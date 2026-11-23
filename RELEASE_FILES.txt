@@ -1,0 +1,21 @@
+Proposed initial commit (all new; no secrets/internal handoff):
+.gitignore
+.python-version
+.streamlit/secrets.toml.example
+README.md
+RELEASE.md
+RELEASE_FILES.txt
+app.py
+requirements-dashboard.txt
+requirements.txt
+tests/fixtures/WhatsApp_Uji_Sintetis_Zahir.zip
+tests/synthetic_social.py
+tests/test_dashboard.py
+tests/test_nlp.py
+tests/test_social.py
+zahir_dashboard/__init__.py
+zahir_dashboard/backend.py
+zahir_dashboard/nlp_backend.py
+zahir_dashboard/nlp_page.py
+zahir_dashboard/social_backend.py
+zahir_dashboard/social_page.py

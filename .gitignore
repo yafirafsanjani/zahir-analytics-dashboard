@@ -1,0 +1,26 @@
+.venv/
+venv/
+venv_*/
+.streamlit/secrets.toml
+.streamlit/secrets.*.toml
+!.streamlit/secrets.toml.example
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Internal exports stay on the laptop
+social_analytics_handoff/
+exports/
+outputs/
+data/
+*.csv
+*.xlsx
+*.parquet
+*.sql
+.release-test/

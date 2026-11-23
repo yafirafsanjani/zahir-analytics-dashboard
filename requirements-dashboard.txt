@@ -1,0 +1,6 @@
+# Dashboard runtime, Python 3.11; no offline NLP training dependencies.
+streamlit==1.67.0
+supabase==2.34.1
+altair==6.3.0
+httpx==0.28.1
+pandas==3.1.1
