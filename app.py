@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from decimal import Decimal
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 from supabase import create_client
@@ -180,11 +181,11 @@ def main() -> None:
     if user is None:
         render_login(client)
         return
-    st.sidebar.success("Sesi pengguna terautentikasi")
+    st.sidebar.success("Akun internal aktif")
     st.sidebar.button("Keluar", on_click=logout)
     page = st.sidebar.radio('Halaman', ['Segmentasi Pelanggan', 'Analisis Media Sosial', 'NLP WhatsApp'], key='analytics_page')
     if page == 'NLP WhatsApp':
-        render_nlp()
+        render_nlp(SegmentationRepository(client, settings.columns).authorize)
         return
     if page == 'Analisis Media Sosial':
         render_social(client)
@@ -226,17 +227,30 @@ def main() -> None:
                 st.caption(f"Periode sumber: {start} sampai {end}. Acuan Recency: {reference}.")
             else:
                 st.warning("Konteks periode pada segmen tidak konsisten; periksa sumber.")
-        st.subheader("Total Nominal per Klaster")
+        st.subheader("Profil klaster")
         chart = pd.DataFrame({
             "Klaster": [row["cluster"] for row in summary],
+            "Segmen": [row["name"] for row in summary],
             "Total nominal (Rp)": [float(row["monetary"]) for row in summary],
+            "Jumlah label pelanggan": [row["customers"] for row in summary],
         })
-        st.bar_chart(chart, x="Klaster", y="Total nominal (Rp)", color="Klaster", sort=False)
-        st.caption("Sumbu horizontal: kode klaster. Sumbu vertikal: rupiah dari grand total yang dihitung sekali per kelompok faktur.")
+        for panel, measure, fmt in zip(st.columns(2), ("Total nominal (Rp)", "Jumlah label pelanggan"), (",.0f", ",d")):
+            with panel:
+                st.caption(measure)
+                bars = alt.Chart(chart).mark_bar(color="#2C7A7B", cornerRadiusEnd=3).encode(
+                    x=alt.X(measure, axis=alt.Axis(format=fmt)),
+                    y=alt.Y("Klaster", sort=None),
+                    tooltip=["Klaster", "Segmen", alt.Tooltip(measure, format=fmt)],
+                )
+                zero_labels = alt.Chart(chart[chart[measure].eq(0)]).mark_text(
+                    align="left", dx=6, color="#7D888D",
+                ).encode(x=alt.X(measure), y=alt.Y("Klaster", sort=None), text=alt.value("0"))
+                st.altair_chart((bars + zero_labels).properties(height=170), width="stretch")
         st.dataframe(pd.DataFrame([{
-            "Klaster": row["cluster"], "Nama segmen": row["name"],
+            "Klaster": row["cluster"],
+            "Nama segmen": row["name"],
             "Jumlah label": row["customers"],
-            "Persentase label": 100 * row["customers"] / customer_count if customer_count else 0,
+            "Persentase label (%)": round(100 * row["customers"] / customer_count, 1) if customer_count else 0,
             "Total nominal": rupiah(row["monetary"]),
         } for row in summary]), hide_index=True, width="stretch")
         totals = render_detail(repo, choice, {row["cluster"]: row["name"] for row in summary})

@@ -39,7 +39,7 @@ def heatmap(frame, x, y, value, x_order=None, y_order=None):
 
 
 def render_google(reviews):
-    st.subheader('Rating dan sentimen Google Play')
+    st.subheader('Ulasan Google Play')
     frame = filters(reviews, 'review_date', 'app_name', 'Aplikasi', 'social_gp')
     if frame.empty:
         return
@@ -59,11 +59,22 @@ def render_google(reviews):
     with right:
         st.subheader('Distribusi sentimen manusia')
         sentiment = frame.human_sentiment_label.value_counts().reindex(LABELS, fill_value=0).rename_axis('Sentimen').reset_index(name='Ulasan')
-        st.bar_chart(sentiment, x='Sentimen', y='Ulasan')
+        sentiment['Sentimen'] = sentiment['Sentimen'].map({
+            'negative': 'Negatif', 'neutral': 'Netral', 'positive': 'Positif',
+        })
+        chart = alt.Chart(sentiment).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+            x=alt.X('Sentimen:N', sort=['Negatif', 'Netral', 'Positif']),
+            y=alt.Y('Ulasan:Q', axis=alt.Axis(tickMinStep=1)),
+            color=alt.Color('Sentimen:N', scale=alt.Scale(
+                domain=['Negatif', 'Netral', 'Positif'], range=['#D86373', '#7D888D', '#2C7A7B'],
+            ), legend=None),
+            tooltip=['Sentimen', 'Ulasan'],
+        )
+        st.altair_chart(chart, width='stretch')
     st.subheader('Tren sentimen dan volume ulasan')
     monthly = frame.assign(Bulan=pd.to_datetime(frame.review_date).dt.to_period('M').astype(str))
     trend = monthly.groupby(['Bulan', 'human_sentiment_label']).size().unstack(fill_value=0).reindex(columns=LABELS, fill_value=0)
-    st.line_chart(trend)
+    st.line_chart(trend.rename(columns={'negative': 'Negatif', 'neutral': 'Netral', 'positive': 'Positif'}))
     st.caption('Jumlah ulasan per sentimen menurut bulan tanggal ulasan. Bulan tanpa pengamatan tidak ditambahkan sebagai data baru.')
     st.subheader('Frekuensi aspek')
     aspects = pd.DataFrame({'Aspek': list(ASPECTS.values()), 'Jumlah ulasan': frame[list(ASPECTS)].sum().to_numpy()})
@@ -95,8 +106,12 @@ def render_instagram(posts):
             Total_interaksi=('total_interactions','sum')).reset_index()
         if key == 'is_collaboration':
             comparison[key] = comparison[key].map({True: 'Kolaborasi', False: 'Nonkolaborasi'})
-        st.bar_chart(comparison, x=key, y=['Rata_rata','Median'], stack=False)
-        st.dataframe(comparison, hide_index=True, width='stretch')
+        comparison = comparison.rename(columns={
+            key: 'Kelompok', 'Rata_rata': 'Rata-rata', 'Total_interaksi': 'Total interaksi',
+        })
+        st.bar_chart(comparison, x='Kelompok', y=['Rata-rata', 'Median'], stack=False)
+        st.dataframe(comparison, hide_index=True, width='stretch',
+                     column_config={'Rata-rata': st.column_config.NumberColumn(format='%.1f')})
     st.subheader('Hari dan jam posting WIB')
     days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
     time = frame.groupby(['post_day_of_week','post_hour_wib']).agg(
@@ -111,8 +126,14 @@ def render_instagram(posts):
         st.scatter_chart(frame, x='hashtag_count', y='total_interactions')
     st.caption('Sumbu horizontal: jumlah kata caption / jumlah hashtag. Hubungan tidak menunjukkan sebab-akibat.')
     st.subheader('Top Postingan')
-    st.dataframe(top_posts(frame)[['Peringkat','post_id','post_date','content_type','likes','comments',
-        'total_interactions','interaction_tier','percentile_rank','is_interaction_outlier']], hide_index=True, width='stretch')
+    ranked = top_posts(frame)[['Peringkat', 'post_id', 'post_date', 'content_type', 'likes', 'comments',
+                               'total_interactions', 'interaction_tier', 'percentile_rank', 'is_interaction_outlier']]
+    st.dataframe(ranked.rename(columns={
+        'post_id': 'ID postingan', 'post_date': 'Tanggal', 'content_type': 'Format',
+        'likes': 'Likes', 'comments': 'Komentar', 'total_interactions': 'Total interaksi',
+        'interaction_tier': 'Tingkat interaksi', 'percentile_rank': 'Persentil',
+        'is_interaction_outlier': 'Outlier',
+    }), hide_index=True, width='stretch')
     st.caption('Peringkat dihitung ulang setelah filter, dengan post_id sebagai pemecah seri. '
                'Tier, persentil, dan penanda outlier tetap dihitung dari sampel lengkap 55 postingan.')
 

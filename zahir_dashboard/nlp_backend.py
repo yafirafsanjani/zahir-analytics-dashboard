@@ -24,6 +24,7 @@ def process_zip(name, content, model_config=None, role_map=None):
         from zahir_dashboard.nlp_core.ingestion import ingest_whatsapp_zip, ZipValidationError
         from zahir_dashboard.nlp_core.inference_pipeline import analyze_uploaded_conversations
         from zahir_dashboard.nlp_core.analytics import AnalyticsService
+        from zahir_dashboard.nlp_data import records_from_master
     except ImportError as exc:
         raise NLPError('Dependensi NLP belum tersedia: ' + str(exc.name) + '. Instal requirements.txt dashboard.') from None
     try:
@@ -45,8 +46,11 @@ def process_zip(name, content, model_config=None, role_map=None):
             issues = analytics.issues(session_id=session_id)
             if not overview['total_issues'] or not issues['categories']:
                 raise NLPError('Hasil analisis kosong. Periksa isi ekspor WhatsApp.')
+            records = records_from_master(run_dir / 'output' / 'master_conversations_final.csv',
+                                          analytics._load_mapping(run_dir))
             return dict(session_id=session_id, overview=overview, issues=issues,
-                        filename=name, processing='local')
+                        filename=name, processing='local',
+                        records=records.to_dict(orient='records'))
         # All chat/media/intermediate/master files are removed even if processing fails.
     except StartupError as exc:
         raise NLPError(str(exc)) from None

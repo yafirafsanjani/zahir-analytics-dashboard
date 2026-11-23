@@ -20,6 +20,7 @@ zahir_dashboard/__init__.py
 zahir_dashboard/backend.py
 zahir_dashboard/nlp_assets.py
 zahir_dashboard/nlp_backend.py
+zahir_dashboard/nlp_data.py
 zahir_dashboard/nlp_core/PROVENANCE.md
 zahir_dashboard/nlp_core/__init__.py
 zahir_dashboard/nlp_core/analytics.py

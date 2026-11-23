@@ -10,10 +10,12 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import zipfile
 
+import pandas as pd
 from streamlit.testing.v1 import AppTest
 from test_dashboard import FakeClient
 from zahir_dashboard.nlp_backend import NLPError, process_zip
 from zahir_dashboard import nlp_assets
+from zahir_dashboard.nlp_data import load_history, records_from_master
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / 'tests/fixtures/WhatsApp_Uji_Sintetis_Zahir.zip'
@@ -71,6 +73,81 @@ class NLPPageTests(unittest.TestCase):
             next(b for b in app.button if b.label == 'Keluar').click().run()
             self.assertNotIn('nlp_result', app.session_state)
             self.assertEqual(len(app.metric), 0)
+
+    def test_upload_pipeline_populates_detail_and_filters_with_synthetic_fixture(self):
+        uploaded = io.BytesIO(FIXTURE.read_bytes())
+        uploaded.name = FIXTURE.name
+        app = self.app()
+        prediction = dict(predicted_category='DATABASE_SYSTEM_ERROR', confidence=91.0)
+        with (
+            patch('zahir_dashboard.nlp_assets.ensure_models'),
+            patch('zahir_dashboard.nlp_core.inference_pipeline.load_inference_artifacts'),
+            patch('zahir_dashboard.nlp_core.consolidation.predict_single_text', return_value=prediction),
+            patch('zahir_dashboard.nlp_page.st.file_uploader', return_value=uploaded),
+        ):
+            app.run()
+            next(b for b in app.button if b.label == 'Proses').click().run()
+            self.assertFalse(app.exception)
+            self.assertFalse(app.error)
+            self.assertEqual([m.value for m in app.metric[:2]], ['3', '3'])
+            self.assertEqual([t.label for t in app.tabs],
+                             ['Ringkasan', 'Penanganan', 'Pelanggan', 'Tren waktu', 'Detail percakapan'])
+            records = app.session_state['nlp_result']['records']
+            self.assertEqual(len(records), 3)
+            self.assertEqual(len({row['Pelanggan'] for row in records}), 3)
+            self.assertNotIn('full_conversation', records[0])
+            self.assertNotIn('source_file', records[0])
+            self.assertTrue(app.session_state['nlp_result']['filename'].endswith('.zip'))
+            next(item for item in app.multiselect if item.label == 'Penanganan').set_value(['Remote']).run()
+            self.assertTrue(any('Tidak ada kendala' in element.value for element in app.info))
+
+    def test_history_uses_internal_access_before_loading(self):
+        frame = pd.DataFrame([dict(
+            Kendala='K-0001', Percakapan='P-0001', Pelanggan='C-0001',
+            Mulai=pd.Timestamp('2026-08-01'), Selesai=pd.Timestamp('2026-08-01'),
+            Kategori='DATABASE_SYSTEM_ERROR', Penanganan='Remote', Kecocokan='Sesuai',
+            **{'Respons klien': 'Merespons', 'Jumlah pesan': 4, 'Pesan klien': 2, 'Pesan admin': 2,
+               'Ada media': 'Tidak', 'Indikasi kredensial': 'Tidak',
+               'Kategori aturan': 'DATABASE_SYSTEM_ERROR', 'Skor model': 90.0},
+        )])
+        for allowed in (True, False):
+            with self.subTest(allowed=allowed):
+                app = self.app()
+                app.session_state['_supabase_client'] = FakeClient(allowed=allowed)
+                app.secrets['nlp_history'] = {'asset_id': '1234', 'sha256': '0' * 64}
+                with patch('zahir_dashboard.nlp_page.load_history', return_value=frame) as load:
+                    app.run()
+                    self.assertFalse(app.exception)
+                    if allowed:
+                        self.assertFalse(app.error)
+                        self.assertEqual(app.metric[0].value, '1')
+                        self.assertEqual(app.radio(key='nlp_source').value, 'Data historis')
+                        app.run()
+                        load.assert_called_once()
+                    else:
+                        load.assert_not_called()
+                        self.assertTrue(any('izin baca' in item.value for item in app.error))
+                        self.assertNotIn('nlp_history_records', app.session_state)
+
+    def test_private_snapshot_round_trip_keeps_only_dashboard_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            master = Path(directory) / 'master.csv'
+            pd.DataFrame([dict(
+                sub_conversation_id='sub-1', conversation_id='conv-1', source_file='Private customer.txt',
+                start_time='01/08/26 12.00', penanganan_remote='REMOTE',
+                kategori_kendala_ml_predicted='DATABASE_SYSTEM_ERROR',
+                full_conversation='PRIVATE MESSAGE', client_response='RESPONS',
+            )]).to_csv(master, index=False)
+            exported = records_from_master(master)
+            def download(client, repository, asset_id, token, destination, digest):
+                exported.to_csv(destination, index=False)
+            with patch('zahir_dashboard.nlp_data.download_asset', side_effect=download):
+                frame = load_history({'asset_id': '1234', 'sha256': '0' * 64},
+                                     {'repository': 'owner/models', 'read_token': 'test'})
+            self.assertEqual(str(frame.iloc[0]['Mulai']), '2026-08-01 12:00:00')
+            self.assertEqual(frame.iloc[0]['Pelanggan'], 'C-0001')
+            self.assertNotIn('PRIVATE MESSAGE', frame.to_csv(index=False))
+            self.assertNotIn('Private customer', frame.to_csv(index=False))
 
     def test_login_and_missing_file(self):
         app = self.app(False).run()

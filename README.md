@@ -130,3 +130,46 @@ model siap, melarang fit/train, menguji unggahan bersamaan 3 vs 1 percakapan,
 cleanup, browser/sesi baru, kegagalan, pergantian halaman dan logout.
 Tes Supabase memakai fake client tanpa mengubah database. Handoff internal tidak
 dibaca dan tetap diabaikan Git. Detail hasil: LOCAL_NLP_REPORT.md.
+
+## Data historis NLP WhatsApp
+
+Tab Ringkasan, Penanganan, Pelanggan, Tren waktu, dan Detail percakapan dapat
+digunakan untuk ZIP yang baru diunggah dan untuk snapshot hasil analisis yang
+sudah ada. Saat snapshot historis dikonfigurasi, halaman membukanya secara
+default dan memeriksa izin internal lewat fungsi Supabase
+`has_segmentation_access` yang sudah digunakan oleh dashboard.
+
+1. Temukan `master_conversations_final.csv` dari hasil analisis yang ingin
+   ditampilkan. Jalankan dari root repo dashboard dan ubah path input sesuai
+   lokasi master yang sebenarnya. Tambahkan `--mapping PATH` jika
+   `chat_mapping.json` tidak berada pada path bawaan `raw/chat` pada folder
+   induk output.
+
+   ```powershell
+   python -m zahir_dashboard.nlp_data "D:\path\master_conversations_final.csv" "D:\path\nlp_history.csv"
+   Get-FileHash -Algorithm SHA256 "D:\path\nlp_history.csv"
+   ```
+
+2. Lampirkan `nlp_history.csv` pada rilis di repo GitHub **private** yang sama
+   dengan `nlp_models.repository`. Catat ID numerik aset. Ekspor berisi
+   metadata analitik berkode. Jangan gunakan master asli sebagai aset.
+3. Tambahkan pengaturan berikut ke Streamlit Cloud Secrets. Nilai
+   `nlp_models.read_token` yang berizin baca repo tersebut juga digunakan
+   untuk membaca snapshot.
+
+   ```toml
+   [nlp_history]
+   asset_id = "ID_ASET_CSV"
+   sha256 = "HASH_SHA256"
+   ```
+
+4. Masuk dengan akun internal yang memiliki izin tersebut. Buka **NLP
+   WhatsApp → Data historis**. Unggahan ZIP tetap dapat dianalisis melalui
+   pilihan **Unggahan ZIP**. Kedua sumber ditampilkan sendiri-sendiri agar
+   data yang sama tidak dihitung dua kali.
+
+Kode pelanggan, percakapan, dan kendala berlaku di dalam masing-masing
+snapshot atau unggahan. Detail tidak menyertakan isi chat, nama pelanggan,
+nama file sumber, atau nilai kredensial. Indikasi kredensial hanya berupa
+status. Kecocokan adalah perbandingan kategori model dengan kategori
+berbasis aturan, bukan pengukuran akurasi terhadap label manual.
