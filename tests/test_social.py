@@ -107,10 +107,10 @@ class SocialUITests(unittest.TestCase):
         client=SocialClient(segmentation_allowed=False)
         app=self.app(client).run()
         self.assertEqual(len(app.exception),0)
-        self.assertEqual([t.label for t in app.tabs],['Google Play','Instagram','Evaluasi & Eksplorasi'])
+        self.assertEqual([t.label for t in app.tabs],['Play Store','Instagram','Evaluasi & Eksplorasi'])
         values={m.label:m.value for m in app.metric}
-        self.assertEqual(values['Jumlah ulasan'],'205')
-        self.assertEqual(values['Pasangan ulasan–aspek'],'172')
+        self.assertEqual(values['Jumlah Ulasan'],'205')
+        self.assertEqual(values['Sentimen Dominan'],'Negatif (33.7%)')
         self.assertEqual(values['Jumlah postingan'],'9')
         self.assertEqual(values['Total interaksi'],'64')
         self.assertNotIn('has_segmentation_access',client.rpc_calls)

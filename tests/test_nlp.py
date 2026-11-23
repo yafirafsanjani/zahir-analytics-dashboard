@@ -91,7 +91,8 @@ class NLPPageTests(unittest.TestCase):
             self.assertFalse(app.error)
             self.assertEqual([m.value for m in app.metric[:2]], ['3', '3'])
             self.assertEqual([t.label for t in app.tabs],
-                             ['Ringkasan', 'Penanganan', 'Pelanggan', 'Tren waktu', 'Detail percakapan'])
+                             ['Ringkasan', 'Detail Percakapan', 'Analisis Kendala', 'Analisis Remote',
+                              'Analisis Pelanggan', 'Tren Waktu', 'Tambah Data'])
             records = app.session_state['nlp_result']['records']
             self.assertEqual(len(records), 3)
             self.assertEqual(len({row['Pelanggan'] for row in records}), 3)
@@ -100,6 +101,16 @@ class NLPPageTests(unittest.TestCase):
             self.assertTrue(app.session_state['nlp_result']['filename'].endswith('.zip'))
             next(item for item in app.multiselect if item.label == 'Penanganan').set_value(['Remote']).run()
             self.assertTrue(any('Tidak ada kendala' in element.value for element in app.info))
+            next(b for b in app.button if b.label == 'Reset Filter').click().run()
+            self.assertEqual([m.value for m in app.metric[:2]],['3','3'])
+            next(b for b in app.button if b.label == 'Tinjau Data').click().run()
+            self.assertEqual(app.session_state['nlp_tabs'],'Detail Percakapan')
+            self.assertTrue(any(e.label=='Cari kode, kategori, atau pelanggan' for e in app.text_input))
+            app.session_state['nlp_tabs']='Tambah Data'
+            app.run()
+            next(b for b in app.button if b.label=='Unggah File Lain').click().run()
+            self.assertEqual(app.session_state['nlp_upload_status'],'ready')
+            self.assertIn('nlp_result',app.session_state)
 
     def test_history_uses_internal_access_before_loading(self):
         frame = pd.DataFrame([dict(

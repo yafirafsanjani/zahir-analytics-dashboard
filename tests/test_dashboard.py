@@ -177,9 +177,9 @@ class UITests(unittest.TestCase):
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.session_state["invoice_page"], 0)
         self.assertEqual(app.metric[0].value, "1.456")
-        self.assertEqual(app.metric[2].value, "3")
+        self.assertEqual(next(m.value for m in app.metric if m.label == 'Klaster'), "3")
         app.selectbox(key="model_key").select("gmm_k4").run()
-        self.assertEqual(app.metric[2].value, "4")
+        self.assertEqual(next(m.value for m in app.metric if m.label == 'Klaster'), "4")
 
     def test_unauthorized_never_reads_tables(self):
         client = FakeClient(False)

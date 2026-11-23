@@ -85,6 +85,12 @@ SUMMARY_OPTIONAL = {
     "end": ("analysis_end",),
     "reference": ("recency_reference",),
     "status": ("analysis_status",),
+    "recency": ("recency_mean", "mean_recency", "avg_recency"),
+    "frequency": ("frequency_mean", "mean_frequency", "avg_frequency"),
+    "rfm_monetary": ("monetary_mean", "mean_monetary", "avg_monetary"),
+    "silhouette": ("silhouette", "silhouette_score"),
+    "davies_bouldin": ("davies_bouldin", "davies_bouldin_score", "davies_bouldin_index"),
+    "calinski_harabasz": ("calinski_harabasz", "calinski_harabasz_score", "calinski_harabasz_index"),
 }
 DETAIL_FIELDS = {
     "company": ("nama_klien",),
@@ -311,7 +317,7 @@ class SegmentationRepository:
         self.detail_count = integer_value(result.count, "jumlah faktur")
         return self.detail_count
 
-    def detail_page(self, choice: ModelChoice, term: str, page: int, page_size: int) -> DetailPage:
+    def detail_page(self, choice: ModelChoice, term: str, page: int, page_size: int, cluster: str | None = None) -> DetailPage:
         if page < 0 or page_size not in {25, 50, 100}:
             raise DashboardError("Ukuran atau nomor halaman tidak valid.")
         term = term.strip()
@@ -321,6 +327,8 @@ class SegmentationRepository:
         query = self._table("faktur_lolos_dengan_klaster").select(",".join(fields.values()), count="exact")
         if term:
             query = query.ilike(fields["company"], "%" + escape_like(term) + "%")
+        if cluster:
+            query = query.eq(fields['cluster'], cluster)
         query = query.order(fields["invoice_id"]).range(page * page_size, (page + 1) * page_size - 1)
         result = self._execute(query)
         count = integer_value(result.count, "jumlah hasil pencarian")
@@ -343,6 +351,24 @@ class SegmentationRepository:
                 "Klaster": cluster,
             })
         return DetailPage(rows, count, page, page_size)
+
+    def export_detail(self, choice, term, cluster=None):
+        """All matching rows under the current user's RLS; never silently export a partial result."""
+        self.authorize()
+        rows, expected = [], None
+        for page in range(500):
+            result = self.detail_page(choice, term, page, 100, cluster)
+            if expected is not None and result.count != expected:
+                raise DashboardError('Cakupan ekspor berubah. Silakan ulangi ekspor.')
+            expected = result.count
+            rows.extend(result.rows)
+            if len(rows) >= expected:
+                if len(rows) != expected or len({r['ID kelompok faktur'] for r in rows}) != len(rows):
+                    raise DashboardError('Kunci atau cakupan ekspor faktur tidak konsisten.')
+                return rows
+            if not result.rows:
+                break
+        raise DashboardError('Ekspor terlalu besar atau belum lengkap. Persempit pencarian.')
 
     def invoice_totals(self) -> dict[str, Any]:
         result = self._execute(self.client.rpc("segmentation_invoice_totals"))

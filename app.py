@@ -2,31 +2,19 @@
 from __future__ import annotations
 
 import time
-from decimal import Decimal
-
-import altair as alt
-import pandas as pd
 import streamlit as st
 from supabase import create_client
 from supabase.lib.client_options import SyncClientOptions
 from zahir_dashboard.social_page import render_social
 from zahir_dashboard.nlp_page import render_nlp
+from zahir_dashboard.ui import apply_theme, page_header, sidebar_brand, mobile_navigation
+from zahir_dashboard.segmentation_page import render_segmentation
 
 from zahir_dashboard.backend import (
     DashboardError,
     SegmentationRepository,
-    reference_checks,
-    rupiah,
     settings_from_secrets,
 )
-
-
-def reset_page() -> None:
-    st.session_state["invoice_page"] = 0
-
-
-def change_page(delta: int) -> None:
-    st.session_state["invoice_page"] = max(0, st.session_state.get("invoice_page", 0) + delta)
 
 
 def logout() -> None:
@@ -81,79 +69,10 @@ def render_login(client) -> None:
         st.rerun()
 
 
-def render_detail(repo: SegmentationRepository, choice, cluster_names):
-    st.subheader("Detail Faktur")
-    st.caption("Satu baris mewakili satu kelompok faktur lolos. Klaster mengikuti label pelanggan pada model terpilih.")
-    try:
-        # Server-side aggregation avoids the REST row cap and checks ID uniqueness.
-        totals = repo.invoice_totals()
-        count = repo.discover_detail(choice)
-        if totals["invoices"] != count:
-            raise DashboardError("Data detail berubah saat dibaca. Muat ulang untuk memperoleh cakupan yang konsisten.")
-    except DashboardError as exc:
-        st.warning("Akses atau kesiapan detail belum lengkap. " + str(exc))
-        st.caption("Administrator perlu memeriksa fungsi audit total, izin SELECT, dan RLS. Data detail belum ditampilkan.")
-        return None
-
-    st.session_state.setdefault("invoice_page", 0)
-    st.session_state.setdefault("company_query", "")
-    with st.form("company_search"):
-        draft = st.text_input(
-            "Cari nama perusahaan", value=st.session_state["company_query"],
-            max_chars=120, placeholder="Ketik sebagian nama perusahaan",
-        )
-        searched = st.form_submit_button("Cari perusahaan")
-    if searched:
-        st.session_state["company_query"] = draft.strip()
-        reset_page()
-    page_size = st.selectbox("Baris per halaman", [25, 50, 100], key="page_size", on_change=reset_page)
-    try:
-        result = repo.detail_page(
-            choice, st.session_state["company_query"], st.session_state["invoice_page"], page_size
-        )
-        last_page = max(0, (result.count - 1) // page_size)
-        if result.page > last_page:
-            st.session_state["invoice_page"] = last_page
-            st.rerun()
-        if result.rows:
-            display_rows = []
-            for row in result.rows:
-                if row["Klaster"] not in cluster_names:
-                    raise DashboardError("Kode klaster detail tidak terdapat pada ringkasan model terpilih.")
-                display_rows.append({
-                    **row, "Grand total (Rp)": float(row["Grand total (Rp)"]),
-                    "Segmen": cluster_names[row["Klaster"]],
-                })
-            st.dataframe(
-                pd.DataFrame(display_rows), hide_index=True, width="stretch",
-                column_config={"Grand total (Rp)": st.column_config.NumberColumn(format="localized")},
-            )
-            start = result.page * page_size + 1
-            end = min((result.page + 1) * page_size, result.count)
-            st.caption(f"Menampilkan {start:,}–{end:,} dari {result.count:,} kelompok faktur hasil pencarian.")
-        else:
-            st.info("Tidak ada faktur yang cocok dengan pencarian nama perusahaan.")
-        st.caption(
-            f"Halaman {result.page + 1} dari {last_page + 1} · "
-            f"Urutan tetap: ID kelompok faktur · Cakupan keseluruhan: {totals['invoices']:,} kelompok."
-        )
-        previous, following, _ = st.columns([1, 1, 4])
-        previous.button(
-            "Sebelumnya", key="previous_page", disabled=result.page == 0,
-            on_click=change_page, args=(-1,),
-        )
-        following.button(
-            "Berikutnya", key="next_page", disabled=result.page >= last_page,
-            on_click=change_page, args=(1,),
-        )
-    except DashboardError as exc:
-        st.error(str(exc))
-    return totals
-
-
 def main() -> None:
     st.set_page_config(page_title="Zahir Analytics", page_icon="📊", layout="wide")
-    st.title("Zahir Analytics")
+    apply_theme()
+    sidebar_brand()
     try:
         settings = settings_from_secrets(st.secrets)
     except DashboardError as exc:
@@ -179,94 +98,22 @@ def main() -> None:
     client = st.session_state["_supabase_client"]
     user = authenticated_user(client)
     if user is None:
+        page_header('Selamat datang di Zahir Analytics',
+                    'Masuk untuk mengakses insight bisnis dan analisis pelanggan Anda.', 'Masuk')
         render_login(client)
         return
-    st.sidebar.success("Akun internal aktif")
-    st.sidebar.button("Keluar", on_click=logout)
     page = st.sidebar.radio('Halaman', ['Segmentasi Pelanggan', 'Analisis Media Sosial', 'NLP WhatsApp'], key='analytics_page')
+    mobile_navigation(page)
+    st.sidebar.divider()
+    st.sidebar.caption("● Akun internal aktif")
+    st.sidebar.button("Keluar", on_click=logout)
     if page == 'NLP WhatsApp':
         render_nlp(SegmentationRepository(client, settings.columns).authorize)
         return
     if page == 'Analisis Media Sosial':
         render_social(client)
         return
-    st.header("Segmentasi Pelanggan")
-    st.caption("Profil eksploratif dari kelompok faktur lolos cleaning. Nama standar masih merupakan label pelanggan sementara.")
-    repo = SegmentationRepository(client, settings.columns)
-    try:
-        repo.authorize()
-    except DashboardError as exc:
-        st.error(str(exc))
-        st.info("Ringkasan dan detail hanya tersedia untuk akun internal yang berwenang.")
-        return
-    st.sidebar.caption("Izin internal terverifikasi pada database.")
-    try:
-        choices = repo.discover_models()
-        by_key = {choice.key: choice for choice in choices}
-        if st.session_state.get("model_key") not in by_key:
-            st.session_state.pop("model_key", None)
-        if "kmeans_k4" not in by_key:
-            st.warning("Ringkasan K-Means k=4 belum tersedia; hanya konfigurasi yang terbaca yang ditampilkan.")
-        key = st.selectbox(
-            "Model segmentasi", list(by_key), format_func=lambda value: by_key[value].title,
-            key="model_key", on_change=reset_page,
-        )
-        choice = by_key[key]
-        summary = repo.summary(choice)
-        customer_count = sum(row["customers"] for row in summary)
-        monetary = sum((row["monetary"] for row in summary), Decimal(0))
-        a, b, c = st.columns(3)
-        a.metric("Label pelanggan sementara", f"{customer_count:,}".replace(",", "."))
-        b.metric("Total nominal model terpilih", rupiah(monetary))
-        c.metric("Jumlah klaster", choice.k)
-        st.caption(f"KPI hanya menjumlahkan {choice.title}; konfigurasi lain tidak ikut dijumlahkan.")
-        if all(row.get("start") and row.get("end") and row.get("reference") for row in summary):
-            scopes = {(row["start"], row["end"], row["reference"]) for row in summary}
-            if len(scopes) == 1:
-                start, end, reference = scopes.pop()
-                st.caption(f"Periode sumber: {start} sampai {end}. Acuan Recency: {reference}.")
-            else:
-                st.warning("Konteks periode pada segmen tidak konsisten; periksa sumber.")
-        st.subheader("Profil klaster")
-        chart = pd.DataFrame({
-            "Klaster": [row["cluster"] for row in summary],
-            "Segmen": [row["name"] for row in summary],
-            "Total nominal (Rp)": [float(row["monetary"]) for row in summary],
-            "Jumlah label pelanggan": [row["customers"] for row in summary],
-        })
-        for panel, measure, fmt in zip(st.columns(2), ("Total nominal (Rp)", "Jumlah label pelanggan"), (",.0f", ",d")):
-            with panel:
-                st.caption(measure)
-                bars = alt.Chart(chart).mark_bar(color="#2C7A7B", cornerRadiusEnd=3).encode(
-                    x=alt.X(measure, axis=alt.Axis(format=fmt)),
-                    y=alt.Y("Klaster", sort=None),
-                    tooltip=["Klaster", "Segmen", alt.Tooltip(measure, format=fmt)],
-                )
-                zero_labels = alt.Chart(chart[chart[measure].eq(0)]).mark_text(
-                    align="left", dx=6, color="#7D888D",
-                ).encode(x=alt.X(measure), y=alt.Y("Klaster", sort=None), text=alt.value("0"))
-                st.altair_chart((bars + zero_labels).properties(height=170), width="stretch")
-        st.dataframe(pd.DataFrame([{
-            "Klaster": row["cluster"],
-            "Nama segmen": row["name"],
-            "Jumlah label": row["customers"],
-            "Persentase label (%)": round(100 * row["customers"] / customer_count, 1) if customer_count else 0,
-            "Total nominal": rupiah(row["monetary"]),
-        } for row in summary]), hide_index=True, width="stretch")
-        totals = render_detail(repo, choice, {row["cluster"]: row["name"] for row in summary})
-        checks = reference_checks(summary, totals)
-        with st.expander("Validasi cakupan terhadap notebook", expanded=not all(row["Sesuai"] for row in checks)):
-            st.dataframe(pd.DataFrame(checks), hide_index=True, width="stretch")
-            st.caption(
-                "Acuan: 1.456 label per model, 2.874 kelompok faktur, dan Rp8.225.196.662,39. "
-                "Nilai terbaca berasal dari Supabase dalam cakupan izin pengguna; perubahan data atau RLS dapat mengubah hasil."
-            )
-            if totals is None:
-                st.info("Validasi jumlah dan total nominal detail masih menunggu akses/fungsi audit database.")
-        if not all(row["Sesuai"] for row in checks):
-            st.warning("Cakupan Supabase berbeda dari acuan notebook. Periksa impor dan izin baris sebelum menggunakan angka.")
-    except DashboardError as exc:
-        st.error(str(exc))
+    render_segmentation(SegmentationRepository(client, settings.columns))
 
 
 if __name__ == "__main__":

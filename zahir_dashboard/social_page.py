@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from zahir_dashboard.backend import DashboardError
+from zahir_dashboard.ui import activate, data_card, page_header, panel, progress_list, reset_widgets, SENTIMENT_COLORS
 from zahir_dashboard.social_backend import (
     ASPECTS, LABELS, PREDICTIONS, SocialRepository, aspect_sentiments, confusion_matrix,
     filter_rows, snapshot_checks, top_posts,
@@ -15,11 +16,12 @@ def number(value):
 
 
 def filters(frame, date_col, category, label, key):
-    a, b = st.columns(2)
-    dates = a.date_input('Periode', value=(frame[date_col].min(), frame[date_col].max()),
-                         key=key + '_dates', format='DD/MM/YYYY')
-    choices = sorted(frame[category].unique())
-    selected = b.multiselect(label, choices, default=choices, key=key + '_categories')
+    with panel():
+        a, b = st.columns(2)
+        dates = a.date_input('Periode', value=(frame[date_col].min(), frame[date_col].max()),
+                             key=key + '_dates', format='DD/MM/YYYY')
+        choices = sorted(frame[category].unique())
+        selected = b.multiselect(label, choices, default=choices, key=key + '_categories')
     if not isinstance(dates, (tuple, list)) or len(dates) != 2:
         st.info('Pilih tanggal awal dan akhir untuk menampilkan data.')
         return frame.iloc[0:0]
@@ -38,57 +40,95 @@ def heatmap(frame, x, y, value, x_order=None, y_order=None):
     st.altair_chart(chart, width='stretch')
 
 
-def render_google(reviews):
-    st.subheader('Ulasan Google Play')
-    frame = filters(reviews, 'review_date', 'app_name', 'Aplikasi', 'social_gp')
-    if frame.empty:
+def render_google(reviews, posts):
+    with st.container(key='playstore-filters'), panel():
+        dates_col,apps_col,rating_col,sentiment_col,reset_col=st.columns([1.5,1.4,1,1,.8])
+        with dates_col.popover('Periode',icon=':material/calendar_today:',width='stretch'):
+            dates=st.date_input('Periode ulasan',value=(reviews.review_date.min(),reviews.review_date.max()),
+                               key='social_gp_dates',format='DD/MM/YYYY')
+        apps=sorted(reviews.app_name.unique())
+        with apps_col.popover('Aplikasi',icon=':material/apps:',width='stretch'):
+            selected=st.multiselect('Aplikasi',apps,default=apps,key='social_gp_categories')
+        with rating_col.popover('Rating',icon=':material/star:',width='stretch'):
+            ratings=st.multiselect('Rating',[1,2,3,4,5],default=[1,2,3,4,5],key='social_gp_rating')
+        with sentiment_col.popover('Sentimen',icon=':material/mood:',width='stretch'):
+            sentiments=st.multiselect('Sentimen',LABELS,default=LABELS,key='social_gp_sentiment',
+                                format_func=lambda x:{'positive':'Positif','neutral':'Netral','negative':'Negatif'}[x])
+        reset_col.button('Reset Filter',key='social_gp_reset',on_click=reset_widgets,
+                 args=(['social_gp_dates','social_gp_categories','social_gp_rating','social_gp_sentiment'],))
+    if not isinstance(dates,(tuple,list)) or len(dates)!=2:
+        st.info('Pilih tanggal awal dan akhir untuk menampilkan data.')
         return
-    a,b,c,d = st.columns(4)
-    a.metric('Jumlah ulasan', number(len(frame)))
-    b.metric('Rata-rata rating', f'{frame.score.mean():.2f} / 5')
-    c.metric('Sentimen positif', f'{frame.human_sentiment_label.eq("positive").mean():.1%}')
-    d.metric('Pasangan ulasan–aspek', number(frame[list(ASPECTS)].sum().sum()))
+    frame=filter_rows(reviews,'review_date',dates,'app_name',selected)
+    st.caption(f'Periode: {dates[0]:%d %b %Y} – {dates[1]:%d %b %Y} · {len(selected)} aplikasi · '
+               f'{len(ratings)} pilihan rating · {len(sentiments)} sentimen. Geser baris filter pada layar sempit.')
+    frame=frame[frame.score.isin(ratings) & frame.human_sentiment_label.isin(sentiments)]
+    if frame.empty:
+        st.info('Tidak ada data yang cocok dengan filter rating dan sentimen.')
+        return
+    with st.container(key='social-kpis'):
+        a,b,c=st.columns(3)
+        a.metric('Jumlah Ulasan',number(len(frame)))
+        b.metric('Rating Rata-rata',f'{frame.score.mean():.2f} / 5')
+        counts=frame.human_sentiment_label.value_counts()
+        dominant=counts.index[0]
+        c.metric('Sentimen Dominan',{'positive':'Positif','neutral':'Netral','negative':'Negatif'}[dominant]+f' ({counts.iloc[0]/len(frame):.1%})')
     st.caption('Mengikuti filter. Sentimen berasal dari anotasi manusia, terpisah dari rating bintang. '
                f'{number(frame[list(ASPECTS)].any(axis=1).sum())} ulasan menyebut setidaknya satu aspek. '
                f'Ulasan dibalas developer: {frame.has_developer_reply.mean():.1%}.')
-    left,right = st.columns(2)
-    with left:
-        st.subheader('Distribusi rating')
-        rating = frame.score.value_counts().reindex(range(1,6), fill_value=0).rename_axis('Bintang').reset_index(name='Ulasan')
-        st.bar_chart(rating, x='Bintang', y='Ulasan')
-    with right:
-        st.subheader('Distribusi sentimen manusia')
-        sentiment = frame.human_sentiment_label.value_counts().reindex(LABELS, fill_value=0).rename_axis('Sentimen').reset_index(name='Ulasan')
-        sentiment['Sentimen'] = sentiment['Sentimen'].map({
-            'negative': 'Negatif', 'neutral': 'Netral', 'positive': 'Positif',
-        })
-        chart = alt.Chart(sentiment).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
-            x=alt.X('Sentimen:N', sort=['Negatif', 'Netral', 'Positif']),
-            y=alt.Y('Ulasan:Q', axis=alt.Axis(tickMinStep=1)),
-            color=alt.Color('Sentimen:N', scale=alt.Scale(
-                domain=['Negatif', 'Netral', 'Positif'], range=['#D86373', '#7D888D', '#2C7A7B'],
-            ), legend=None),
-            tooltip=['Sentimen', 'Ulasan'],
-        )
+    st.caption(f"{number(frame[list(ASPECTS)].sum().sum())} pasangan ulasan–aspek dalam cakupan filter.")
+    with panel('Tren Ulasan','Distribusi volume ulasan berdasarkan sentimen.'):
+        frequency=st.selectbox('Interval tren',['Bulanan','Harian'],key='social_trend_interval')
+        dates=pd.to_datetime(frame.review_date)
+        series=frame.assign(Periode=dates.dt.to_period('M').dt.start_time if frequency=='Bulanan' else dates)
+        trend=series.groupby(['Periode','human_sentiment_label']).size().reset_index(name='Ulasan')
+        trend['Sentimen']=trend.human_sentiment_label.map({'positive':'Positif','neutral':'Netral','negative':'Negatif'})
+        color=alt.Color('Sentimen:N',scale=alt.Scale(domain=['Positif','Netral','Negatif'],range=SENTIMENT_COLORS))
+        line=alt.Chart(trend).mark_line(point=True).encode(x='Periode:T',y=alt.Y('Ulasan:Q',title='Jumlah ulasan'),
+                color=color,tooltip=[alt.Tooltip('Periode:T',format='%d %b %Y'),'Sentimen','Ulasan'])
+        st.altair_chart(line.properties(height=240),width='stretch')
+    left, right = st.columns(2)
+    with left, panel('Aspek Sering Disebut','Frekuensi aspek dalam ulasan yang sesuai filter.'):
+        aspects = pd.DataFrame({'Aspek': list(ASPECTS.values()), 'Jumlah ulasan': frame[list(ASPECTS)].sum().to_numpy()})
+        aspects=aspects.sort_values('Jumlah ulasan',ascending=False)
+        progress_list(list(aspects.itertuples(index=False,name=None)),len(frame),'ulasan')
+    with right, panel('Sentimen per Aspek','Sentimen ulasan yang menyebut aspek, bukan sentimen tiap aspek.'):
+        aspect_frame=aspect_sentiments(frame)
+        aspect_frame['Urutan']=aspect_frame['Sentimen ulasan'].map({'positive':0,'neutral':1,'negative':2})
+        aspect_frame['Sentimen ulasan']=aspect_frame['Sentimen ulasan'].map({'positive':'Positif','neutral':'Netral','negative':'Negatif'})
+        chart = alt.Chart(aspect_frame).mark_bar().encode(
+            x=alt.X('Jumlah:Q', stack='normalize',axis=alt.Axis(format='%'),title='Proporsi ulasan'), y='Aspek:N', color=alt.Color('Sentimen ulasan:N',
+                scale=alt.Scale(domain=['Positif','Netral','Negatif'], range=SENTIMENT_COLORS)),order='Urutan:Q',
+            tooltip=['Aspek', 'Sentimen ulasan', 'Jumlah'])
         st.altair_chart(chart, width='stretch')
-    st.subheader('Tren sentimen dan volume ulasan')
-    monthly = frame.assign(Bulan=pd.to_datetime(frame.review_date).dt.to_period('M').astype(str))
-    trend = monthly.groupby(['Bulan', 'human_sentiment_label']).size().unstack(fill_value=0).reindex(columns=LABELS, fill_value=0)
-    st.line_chart(trend.rename(columns={'negative': 'Negatif', 'neutral': 'Netral', 'positive': 'Positif'}))
-    st.caption('Jumlah ulasan per sentimen menurut bulan tanggal ulasan. Bulan tanpa pengamatan tidak ditambahkan sebagai data baru.')
-    st.subheader('Frekuensi aspek')
-    aspects = pd.DataFrame({'Aspek': list(ASPECTS.values()), 'Jumlah ulasan': frame[list(ASPECTS)].sum().to_numpy()})
-    st.bar_chart(aspects, x='Aspek', y='Jumlah ulasan', horizontal=True)
-    st.subheader('Sentimen ulasan yang menyebut aspek')
-    chart = alt.Chart(aspect_sentiments(frame)).mark_bar().encode(
-        x=alt.X('Jumlah:Q', stack='zero'), y='Aspek:N', color='Sentimen ulasan:N',
-        tooltip=['Aspek', 'Sentimen ulasan', 'Jumlah'])
-    st.altair_chart(chart, width='stretch')
-    st.caption('Satu ulasan dapat menyebut beberapa aspek. Warna menunjukkan sentimen seluruh ulasan, bukan sentimen tiap aspek.')
+        st.caption('Satu ulasan dapat menyebut beberapa aspek. Warna menunjukkan sentimen seluruh ulasan, bukan sentimen tiap aspek.')
+    with st.expander('Distribusi rating dan sentimen'):
+        a,b=st.columns(2)
+        a.bar_chart(frame.score.value_counts().rename_axis('Rating').reset_index(name='Ulasan'),x='Rating',y='Ulasan')
+        b.bar_chart(frame.human_sentiment_label.value_counts().rename_axis('Sentimen').reset_index(name='Ulasan'),x='Sentimen',y='Ulasan')
+    with panel('Ulasan Terkini','3 terbaru · Sesuai filter aktif.'):
+        st.button('Lihat Semua',key='social_all_reviews',on_click=activate,args=('social_reviews_all',True))
+        recent=frame.sort_values(['review_date','review_id'],ascending=[False,True]).head(3)
+        for _,row in recent.iterrows():
+            aspects=[label for col,label in ASPECTS.items() if row[col]]
+            data_card(f"{row.review_date:%d %b %Y} · {'★'*int(row.score)}",row.app_name,
+                [{'positive':'Positif','neutral':'Netral','negative':'Negatif'}[row.human_sentiment_label],*aspects],
+                'Versi aplikasi dan teks ulasan belum tersedia pada tabel dashboard.')
+        if st.session_state.get('social_reviews_all'):
+            st.dataframe(frame.rename(columns={'review_date':'Tanggal','app_name':'Aplikasi','score':'Rating',
+                'human_sentiment_label':'Sentimen'}).drop(columns=['review_id']),hide_index=True,width='stretch')
+            st.download_button('Ekspor ulasan terfilter',frame.to_csv(index=False).encode('utf-8-sig'),
+                               'ulasan_terfilter.csv','text/csv')
+            st.button('Tutup daftar',on_click=activate,args=('social_reviews_all',False))
+    with panel('Ringkasan Instagram','Seluruh postingan yang dapat dibaca pada sumber Instagram.'):
+        st.button('Buka Tab',on_click=activate,args=('social_tab','Instagram'),icon=':material/arrow_forward:')
+        a,b,c=st.columns(3)
+        a.metric('Postingan',number(len(posts)))
+        b.metric('Interaksi',number(posts.total_interactions.sum()))
+        c.metric('Rata-rata/Post',f'{posts.total_interactions.mean():.1f}')
 
 
 def render_instagram(posts):
-    st.subheader('Engagement dan performa postingan')
     frame = filters(posts, 'post_date', 'content_type', 'Format konten', 'social_ig')
     if frame.empty:
         return
@@ -99,8 +139,9 @@ def render_instagram(posts):
     d.metric('Total interaksi', number(frame.total_interactions.sum()))
     st.caption('Mengikuti filter. Total interaksi = likes + komentar. Metrik merupakan snapshot, '
                'bukan pertambahan interaksi harian. Data pembagi audiens tidak tersedia untuk engagement rate.')
-    for key, title in [('content_type', 'Perbandingan format'), ('is_collaboration', 'Perbandingan kolaborasi')]:
-        st.subheader(title)
+    for column, key, title in zip(st.columns(2), ['content_type', 'is_collaboration'],
+                                  ['Perbandingan Format', 'Perbandingan Kolaborasi']):
+      with column, panel(title):
         comparison = frame.groupby(key).agg(Postingan=('post_id','size'),
             Rata_rata=('total_interactions','mean'), Median=('total_interactions','median'),
             Total_interaksi=('total_interactions','sum')).reset_index()
@@ -181,7 +222,9 @@ def render_evaluation(data):
 
 
 def render_social(client):
-    st.header('Analisis Media Sosial')
+    page_header('Analisis Media Sosial',
+                'Pantau ulasan pengguna dan performa konten untuk memahami suara pelanggan.',
+                'Analisis Media Sosial')
     try:
         with st.spinner('Memverifikasi izin dan membaca data media sosial…'):
             data = SocialRepository(client).load()
@@ -189,14 +232,15 @@ def render_social(client):
         st.error(str(exc))
         return
     checks = snapshot_checks(data)
-    with st.expander('Validasi snapshot tanpa filter'):
-        st.dataframe(checks, hide_index=True, width='stretch')
+    st.caption(f"Data terhubung · {number(len(data['reviews']))} ulasan Play Store · {number(len(data['posts']))} postingan Instagram")
     if not checks.Sesuai.all():
         st.warning('Cakupan data terbaca berbeda dari snapshot acuan. Periksa isi tabel dan izin baris.')
-    gp,ig,evaluation = st.tabs(['Google Play', 'Instagram', 'Evaluasi & Eksplorasi'])
+    gp,ig,evaluation = st.tabs(['Play Store', 'Instagram', 'Evaluasi & Eksplorasi'],key='social_tab',on_change='rerun')
     with gp:
-        render_google(data['reviews'])
+        render_google(data['reviews'],data['posts'])
     with ig:
         render_instagram(data['posts'])
     with evaluation:
         render_evaluation(data)
+    with st.expander('Validasi snapshot tanpa filter'):
+        st.dataframe(checks, hide_index=True, width='stretch')
