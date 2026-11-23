@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import secrets
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -10,9 +11,10 @@ import httpx
 from streamlit.testing.v1 import AppTest
 
 from test_dashboard import FakeClient
-from zahir_dashboard.nlp_backend import NLPError, api_url, process_zip
+from zahir_dashboard.nlp_backend import NLPError, api_url, api_token, process_zip
 
 ROOT = Path(__file__).resolve().parents[1]
+TEST_TOKEN = secrets.token_urlsafe(32)
 
 
 def result():
@@ -27,11 +29,14 @@ def result():
 
 class APIContractTests(unittest.TestCase):
     def test_contract_and_failures(self):
-        for failure in (None, 'upload', 'analysis', 'empty', 'issues', 'session', 'json', 'connection', 'timeout'):
+        for failure in (None, 'upload', 'analysis', 'empty', 'issues', 'session', 'json', 'connection', 'timeout', 'unauthorized'):
             calls = []
             def handler(req):
                 calls.append(req)
+                self.assertEqual(req.headers.get('Authorization'), 'Bearer ' + TEST_TOKEN)
                 path = req.url.path
+                if failure == 'unauthorized':
+                    return httpx.Response(401)
                 if failure == 'connection':
                     raise httpx.ConnectError('private details', request=req)
                 if failure == 'timeout':
@@ -58,13 +63,16 @@ class APIContractTests(unittest.TestCase):
             factory = httpx.Client
             with patch('zahir_dashboard.nlp_backend.httpx.Client', side_effect=lambda **kw: factory(transport=httpx.MockTransport(handler), **kw)):
                 if failure:
-                    with self.assertRaises(NLPError): process_zip('http://example.test', 'chat.zip', b'zip')
+                    with self.assertRaises(NLPError): process_zip('http://example.test', 'chat.zip', b'zip', service_token=TEST_TOKEN)
                 else:
-                    self.assertEqual(process_zip('http://example.test', 'chat.zip', b'zip')['session_id'], 's1')
+                    self.assertEqual(process_zip('http://example.test', 'chat.zip', b'zip', service_token=TEST_TOKEN)['session_id'], 's1')
                     self.assertEqual([r.method for r in calls], ['POST','POST','GET','GET'])
             self.assertEqual(sum(r.url.path == '/api/upload' for r in calls), 1)
 
     def test_config_and_local_validation(self):
+        self.assertEqual(api_token({'nlp': {'service_token': TEST_TOKEN}}), TEST_TOKEN)
+        with self.assertRaises(NLPError): api_token({})
+        with self.assertRaises(NLPError): process_zip('http://example.test', 'chat.zip', b'zip')
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(api_url({}), 'http://127.0.0.1:8000')
             self.assertEqual(api_url({'nlp': {'api_base_url': 'http://localhost:8011/'}}), 'http://localhost:8011')
@@ -77,6 +85,7 @@ class APIContractTests(unittest.TestCase):
 class NLPPageTests(unittest.TestCase):
     def app(self, signed_in=True):
         app = AppTest.from_file(str(ROOT/'app.py'), default_timeout=30)
+        app.secrets['nlp'] = {'service_token': TEST_TOKEN}
         app.secrets['supabase'] = dict(url='https://example.supabase.co', publishable_key='sb_publishable_test')
         app.session_state['_supabase_client'] = FakeClient(signed_in=signed_in)
         app.session_state['analytics_page'] = 'NLP WhatsApp'
@@ -125,7 +134,7 @@ class LiveIntegrationTests(unittest.TestCase):
         uploaded = io.BytesIO((root/'WhatsApp_Uji_Sintetis_Zahir.zip').read_bytes())
         uploaded.name = 'WhatsApp_Uji_Sintetis_Zahir.zip'
         app = self.app()
-        app.secrets['nlp'] = {'api_base_url': os.environ['NLP_INTEGRATION_URL']}
+        app.secrets['nlp'] = {'api_base_url': os.environ['NLP_INTEGRATION_URL'], 'service_token': os.environ['NLP_SERVICE_TOKEN']}
         with patch.dict(os.environ, {'NLP_API_BASE_URL': os.environ['NLP_INTEGRATION_URL']}), patch('zahir_dashboard.nlp_page.st.file_uploader', return_value=uploaded):
             app.run()
             next(b for b in app.button if b.label == 'Proses').click().run(timeout=180)

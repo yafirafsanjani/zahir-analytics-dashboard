@@ -22,6 +22,7 @@ publishable_key = "sb_publishable_REPLACE_WITH_PROJECT_PUBLIC_KEY"
 
 [nlp]
 api_base_url = "http://127.0.0.1:8000"
+service_token = "REPLACE_WITH_THE_SAME_RANDOM_SERVICE_TOKEN"
 ```
 
 Gunakan publishable key atau legacy anon key, bukan service-role/secret key.
@@ -29,7 +30,7 @@ Password pengguna diisi melalui form login, bukan disimpan pada secrets.
 Gunakan proyek Supabase serta izin/RLS yang sudah tersedia; tidak perlu migrasi.
 Segmentasi memeriksa `has_segmentation_access()` dan Media Sosial memeriksa
 `has_social_analytics_access()`. NLP berada di balik login dashboard, tetapi
-backend belum memeriksa identitas atau pemilik sesi.
+backend demo nlp-zahir-deploy memakai token antarlayanan, belum identitas/pemilik sesi pengguna.
 
 Urutan konfigurasi URL FastAPI di `zahir_dashboard/nlp_backend.py`:
 1. Environment `NLP_API_BASE_URL`.
@@ -84,3 +85,15 @@ Di NLP WhatsApp, unggah fixture ZIP dan tekan Proses: harapkan 3 percakapan dan
 menampilkan error dan mempertahankan hasil sebelumnya. Logout membersihkan
 sesi tampilan, tetapi tidak menghapus file hasil pada backend. Browser baru
 memerlukan login dan tidak otomatis memulihkan hasil sesi browser sebelumnya.
+
+## Token layanan NLP / Render
+
+Isi secrets `[nlp] service_token` dengan secret acak minimal 32 karakter yang
+sama dengan environment NLP_SERVICE_TOKEN pada FastAPI. Jangan pakai PAT GitHub
+sebagai token ini. Semua empat panggilan NLP mengirim Authorization: Bearer,
+tanpa menampilkan token di UI. Token salah menampilkan error dan mempertahankan
+hasil terakhir. Hanya backend nlp-zahir-deploy yang mendapat mekanisme token baru;
+backend pengembangan lama tidak diubah. Lihat ../nlp-zahir-deploy/RENDER.md untuk
+startup unduhan aset privat dan konfigurasi Render. Untuk tes HTTP,
+NLP_SERVICE_TOKEN pada environment proses tes harus sama dengan backend, selain
+NLP_INTEGRATION_URL. Tidak perlu mengubah login atau konfigurasi Supabase.

@@ -50,7 +50,10 @@ git push -u origin main
    uji filter/pencarian, unggah ZIP fixture, tunggu 3 percakapan/kendala,
    pindah halaman dan kembali, uji ZIP rusak, lalu logout.
 
-Demo harus memakai backend bersih berisi data sintetis saja. Login Streamlit
-belum memberikan autentikasi atau pemeriksaan pemilik session_id pada FastAPI.
+Demo harus memakai backend bersih berisi data sintetis saja. Backend
+nlp-zahir-deploy kini memerlukan token layanan bersama dari secrets Streamlit.
+Token ini belum memeriksa identitas atau pemilik session_id per pengguna.
 Jangan gunakan backend publik dengan data pelanggan asli sebelum kontrol akses
 backend dan kebijakan penyimpanan/retensi disiapkan.
+
+Konfigurasi Render dan unduhan model privat terbaru: ../nlp-zahir-deploy/RENDER.md.

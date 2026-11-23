@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from zahir_dashboard.nlp_backend import NLPError, api_url, process_zip
+from zahir_dashboard.nlp_backend import NLPError, api_url, api_token, process_zip
 
 
 def render_nlp():
@@ -10,6 +10,7 @@ def render_nlp():
     st.caption('Unggah ZIP ekspor WhatsApp untuk menganalisis percakapan dan kategori kendala. Setiap unggahan diproses sebagai sesi tersendiri.')
     try:
         base_url = api_url(st.secrets)
+        service_token = api_token(st.secrets)
     except NLPError as exc:
         st.error(str(exc))
         base_url = None
@@ -22,7 +23,7 @@ def render_nlp():
         else:
             try:
                 with st.spinner('Mengunggah dan menjalankan analisis NLP. Mohon tunggu hingga selesai...'):
-                    result = process_zip(base_url, uploaded.name, uploaded.getvalue())
+                    result = process_zip(base_url, uploaded.name, uploaded.getvalue(), service_token=service_token)
                 # Commit only after upload, analysis and both result reads succeed.
                 st.session_state['nlp_result'] = result
                 st.success('Analisis selesai. Hasil terbaru berhasil dimuat.')

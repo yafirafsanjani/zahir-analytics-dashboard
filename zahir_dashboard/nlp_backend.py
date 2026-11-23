@@ -18,9 +18,18 @@ def api_url(secrets):
     return value
 
 
-def process_zip(base_url, name, content):
+def api_token(secrets):
+    token = str(secrets.get('nlp', {}).get('service_token', '')).strip()
+    if len(token) < 32:
+        raise NLPError('Token layanan NLP belum dikonfigurasi. Isi nlp.service_token pada secrets Streamlit.')
+    return token
+
+
+def process_zip(base_url, name, content, service_token=None):
     if not name.lower().endswith('.zip') or not content:
         raise NLPError('Pilih file ZIP ekspor WhatsApp yang tidak kosong.')
+    if not service_token or len(service_token.strip()) < 32:
+        raise NLPError('Token layanan NLP belum dikonfigurasi. Periksa secrets Streamlit.')
 
     def request(client, method, path, stage, **kwargs):
         try:
@@ -30,6 +39,8 @@ def process_zip(base_url, name, content):
         except httpx.RequestError as exc:
             raise NLPError(f'{stage}: API NLP tidak dapat dijangkau. Periksa URL dan pastikan FastAPI aktif.') from exc
         if not response.is_success:
+            if response.status_code in (401, 403):
+                raise NLPError('Akses API NLP ditolak. Pastikan token layanan di Streamlit dan FastAPI sama.')
             detail = ''
             try:
                 detail = response.json().get('detail', '')
@@ -49,7 +60,8 @@ def process_zip(base_url, name, content):
             raise NLPError(f'{stage}: respons API tidak valid.') from exc
 
     # No retries: each explicit submission creates exactly one upload/session.
-    with httpx.Client(base_url=base_url + '/', timeout=httpx.Timeout(900, connect=10)) as client:
+    with httpx.Client(base_url=base_url + '/', timeout=httpx.Timeout(900, connect=10),
+                      headers={'Authorization': f'Bearer {service_token.strip()}'}) as client:
         upload = request(client, 'POST', 'api/upload', 'Unggah ditolak atau gagal',
                          files={'file': (name, content, 'application/zip')})
         session_id = upload.get('session_id')
