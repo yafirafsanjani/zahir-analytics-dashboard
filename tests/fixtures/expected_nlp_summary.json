@@ -1,0 +1,67 @@
+{
+  "overview": {
+    "total_issues": 3,
+    "total_conversations": 3,
+    "remote_cases": 0,
+    "non_remote_cases": 3,
+    "unknown_remote_cases": 0,
+    "remote_rate": 0.0,
+    "top_issue": {
+      "category": "LAPORAN_REPORTING",
+      "count": 1
+    },
+    "category_distribution": [
+      {
+        "category": "LAPORAN_REPORTING",
+        "count": 1,
+        "percentage": 33.33
+      },
+      {
+        "category": "LISENSI_DONGLE_REGISTRASI",
+        "count": 1,
+        "percentage": 33.33
+      },
+      {
+        "category": "TRANSAKSI_INPUT_DATA",
+        "count": 1,
+        "percentage": 33.33
+      }
+    ],
+    "analysis_period": {
+      "start": "2023-08-10T10:15:00",
+      "end": "2023-08-12T10:15:00"
+    }
+  },
+  "issues": {
+    "total_issues": 3,
+    "categories": [
+      {
+        "category": "LAPORAN_REPORTING",
+        "total_cases": 1,
+        "remote_cases": 0,
+        "non_remote_cases": 1,
+        "unknown_remote_cases": 0,
+        "remote_rate": 0.0,
+        "percentage_of_total": 33.33
+      },
+      {
+        "category": "LISENSI_DONGLE_REGISTRASI",
+        "total_cases": 1,
+        "remote_cases": 0,
+        "non_remote_cases": 1,
+        "unknown_remote_cases": 0,
+        "remote_rate": 0.0,
+        "percentage_of_total": 33.33
+      },
+      {
+        "category": "TRANSAKSI_INPUT_DATA",
+        "total_cases": 1,
+        "remote_cases": 0,
+        "non_remote_cases": 1,
+        "unknown_remote_cases": 0,
+        "remote_rate": 0.0,
+        "percentage_of_total": 33.33
+      }
+    ]
+  }
+}

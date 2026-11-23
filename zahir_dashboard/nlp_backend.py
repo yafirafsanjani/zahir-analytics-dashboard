@@ -1,96 +1,58 @@
-"""Session-scoped client for the existing synchronous NLP API."""
-import os
-from urllib.parse import urlsplit
-
-import httpx
+"""Run the existing NLP ingestion/inference/analytics locally in Streamlit."""
+import tempfile
+from pathlib import Path
+from uuid import uuid4
+from collections.abc import Mapping
 
 
 class NLPError(Exception):
     pass
 
 
-def api_url(secrets):
-    value = os.environ.get('NLP_API_BASE_URL') or secrets.get('nlp', {}).get('api_base_url', 'http://127.0.0.1:8000')
-    value = str(value).strip().rstrip('/')
-    parsed = urlsplit(value)
-    if parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.query or parsed.fragment:
-        raise NLPError('URL API NLP tidak valid. Atur NLP_API_BASE_URL atau nlp.api_base_url.')
-    return value
-
-
-def api_token(secrets):
-    token = str(secrets.get('nlp', {}).get('service_token', '')).strip()
-    if len(token) < 32:
-        raise NLPError('Token layanan NLP belum dikonfigurasi. Isi nlp.service_token pada secrets Streamlit.')
-    return token
-
-
-def process_zip(base_url, name, content, service_token=None):
+def process_zip(name, content, model_config=None, role_map=None):
     if not name.lower().endswith('.zip') or not content:
         raise NLPError('Pilih file ZIP ekspor WhatsApp yang tidak kosong.')
-    if not service_token or len(service_token.strip()) < 32:
-        raise NLPError('Token layanan NLP belum dikonfigurasi. Periksa secrets Streamlit.')
-
-    def request(client, method, path, stage, **kwargs):
-        try:
-            response = client.request(method, path, **kwargs)
-        except httpx.TimeoutException as exc:
-            raise NLPError(f'{stage}: waktu tunggu API habis. Analisis mungkin masih berjalan; unggahan tidak diulang otomatis.') from exc
-        except httpx.RequestError as exc:
-            raise NLPError(f'{stage}: API NLP tidak dapat dijangkau. Periksa URL dan pastikan FastAPI aktif.') from exc
-        if not response.is_success:
-            if response.status_code in (401, 403):
-                raise NLPError('Akses API NLP ditolak. Pastikan token layanan di Streamlit dan FastAPI sama.')
-            detail = ''
-            try:
-                detail = response.json().get('detail', '')
-                if isinstance(detail, dict):
-                    detail = detail.get('message', '')
-                if not isinstance(detail, str):
-                    detail = ''
-            except ValueError:
-                pass
-            raise NLPError(f'{stage} (HTTP {response.status_code}). {detail}')
-        try:
-            result = response.json()
-            if not isinstance(result, dict):
-                raise ValueError()
-            return result
-        except ValueError as exc:
-            raise NLPError(f'{stage}: respons API tidak valid.') from exc
-
-    # No retries: each explicit submission creates exactly one upload/session.
-    with httpx.Client(base_url=base_url + '/', timeout=httpx.Timeout(900, connect=10),
-                      headers={'Authorization': f'Bearer {service_token.strip()}'}) as client:
-        upload = request(client, 'POST', 'api/upload', 'Unggah ditolak atau gagal',
-                         files={'file': (name, content, 'application/zip')})
-        session_id = upload.get('session_id')
-        if upload.get('success') is not True or not isinstance(session_id, str) or not session_id.strip():
-            raise NLPError('Unggah gagal: API tidak memberikan session_id yang valid.')
-        analysis = request(client, 'POST', 'api/analyze', 'Analisis gagal', json={'session_id': session_id})
-        if analysis.get('success') is not True or analysis.get('status') != 'completed' or analysis.get('session_id') != session_id:
-            raise NLPError('Analisis gagal atau belum selesai. Periksa layanan pipeline NLP.')
-        overview = request(client, 'GET', 'api/overview', 'Ringkasan gagal dibaca', params={'session_id': session_id})
-        issues = request(client, 'GET', 'api/issues', 'Kategori gagal dibaca', params={'session_id': session_id})
+    if len(content) > 100 * 1024 * 1024:
+        raise NLPError('Ukuran ZIP melebihi batas 100 MB.')
+    if role_map is not None and (not isinstance(role_map, Mapping) or not role_map or any(
+        not isinstance(sender, str) or role not in {'ADMIN', 'CLIENT', 'SYSTEM'}
+        for sender, role in role_map.items()
+    )):
+        raise NLPError('Konfigurasi nlp_roles harus memetakan pengirim ke ADMIN, CLIENT, atau SYSTEM.')
     try:
-        for data in (overview, issues):
-            if data['session_id'] != session_id or data['dataset']['session_id'] != session_id:
-                raise ValueError()
-        for key in ('total_issues', 'total_conversations', 'remote_cases', 'non_remote_cases', 'unknown_remote_cases', 'remote_rate'):
-            if not isinstance(overview[key], (int, float)) or overview[key] < 0:
-                raise ValueError()
-        categories = issues['categories']
-        if overview['total_issues'] == 0 or not categories:
-            raise NLPError('Hasil analisis kosong. Gunakan ZIP berisi percakapan WhatsApp yang dapat dianalisis.')
-        if issues['total_issues'] != overview['total_issues'] or not isinstance(categories, list):
-            raise ValueError()
-        for row in categories:
-            if not isinstance(row['category'], str) or not isinstance(row['total_cases'], int) or row['total_cases'] < 0:
-                raise ValueError()
-            if not isinstance(row['percentage_of_total'], (int, float)):
-                raise ValueError()
-        if sum(row['total_cases'] for row in categories) != issues['total_issues']:
-            raise ValueError()
-    except (KeyError, TypeError, ValueError) as exc:
-        raise NLPError('Hasil API tidak lengkap atau sesi hasil tidak sesuai. Hasil sebelumnya dipertahankan.') from exc
-    return dict(session_id=session_id, overview=overview, issues=issues, api_url=base_url, filename=name)
+        from zahir_dashboard.nlp_assets import ensure_models, StartupError
+        from zahir_dashboard.nlp_core.ingestion import ingest_whatsapp_zip, ZipValidationError
+        from zahir_dashboard.nlp_core.inference_pipeline import analyze_uploaded_conversations
+        from zahir_dashboard.nlp_core.analytics import AnalyticsService
+    except ImportError as exc:
+        raise NLPError('Dependensi NLP belum tersedia: ' + str(exc.name) + '. Instal requirements.txt dashboard.') from None
+    try:
+        ensure_models(model_config)
+        # No user input is used as a filesystem path; one random workspace per submission.
+        session_id = 'session_' + uuid4().hex
+        with tempfile.TemporaryDirectory(prefix='zahir_nlp_') as directory:
+            workspace = Path(directory)
+            run_dir = workspace / 'runs' / session_id
+            zip_path = workspace / 'upload.zip'
+            zip_path.write_bytes(content)
+            metadata = ingest_whatsapp_zip(zip_path, target_dir=run_dir / 'raw', session_id=session_id)
+            if not metadata.get('total_chats'):
+                raise NLPError('Hasil kosong. ZIP tidak berisi percakapan WhatsApp yang dapat dibaca.')
+            analyze_uploaded_conversations(raw_dir=run_dir / 'raw/chat', media_dir=run_dir / 'raw/media',
+                                          run_dir=run_dir, role_map=role_map)
+            analytics = AnalyticsService(runs_dir=workspace / 'runs')
+            overview = analytics.overview(session_id=session_id)
+            issues = analytics.issues(session_id=session_id)
+            if not overview['total_issues'] or not issues['categories']:
+                raise NLPError('Hasil analisis kosong. Periksa isi ekspor WhatsApp.')
+            return dict(session_id=session_id, overview=overview, issues=issues,
+                        filename=name, processing='local')
+        # All chat/media/intermediate/master files are removed even if processing fails.
+    except StartupError as exc:
+        raise NLPError(str(exc)) from None
+    except ZipValidationError:
+        raise NLPError('ZIP ditolak. Pastikan arsip valid, aman, dan sesuai batas ukuran.') from None
+    except NLPError:
+        raise
+    except Exception:
+        raise NLPError('Analisis NLP lokal gagal. Periksa format chat dan kompatibilitas model/dependensi.') from None

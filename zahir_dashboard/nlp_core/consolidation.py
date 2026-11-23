@@ -1,0 +1,223 @@
+"""
+consolidation.py - Penggabungan Hasil Master Final (Fase 18)
+
+Menggabungkan seluruh hasil analisis pipeline NLP Zahir:
+1. client_response (RESPONS / TIDAK_RESPONS)
+2. penanganan_remote (REMOTE / NON_REMOTE) & contains_credentials
+3. kategori_kendala (Ground-Truth & Hasil Prediksi Model AI Produksi)
+4. Statistik pesan (durasi, jumlah pesan klien/admin, cuplikan keluhan)
+Menyimpan berkas master lengkap ke data/output/master_conversations_final.csv.
+"""
+
+import csv
+from pathlib import Path
+from collections import Counter
+from zahir_dashboard.nlp_core.predict import predict_single_text
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+PROCESSED_DIR = BASE_DIR / "data" / "processed"
+OUTPUT_DIR = BASE_DIR / "data" / "output"
+CATEGORIES_CSV = PROCESSED_DIR / "chat_with_categories.csv"
+NORMALIZED_CSV = PROCESSED_DIR / "chat_normalized.csv"
+MASTER_FINAL_CSV = OUTPUT_DIR / "master_conversations_final.csv"
+
+def load_data():
+    with open(CATEGORIES_CSV, "r", encoding="utf-8") as f:
+        cat_rows = list(csv.DictReader(f))
+
+    with open(NORMALIZED_CSV, "r", encoding="utf-8") as f:
+        norm_rows = list(csv.DictReader(f))
+
+    return cat_rows, norm_rows
+
+def build_full_conversation(msgs):
+    """Susun transkrip lengkap satu sub-percakapan (satu baris rapi per record)."""
+    lines = []
+    for m in msgs:
+        role = m.get("role") or m.get("pengirim", "")
+        ts = f"{m.get('tanggal', '')} {m.get('waktu', '')}".strip()
+        text = (m.get("percakapan") or "").strip().replace("\r", " ").replace("\n", " ")
+        prefix = f"[{ts}] {role}" if ts else f"[{role}]"
+        lines.append(f"{prefix}: {text}")
+    return " | ".join(lines)
+
+
+def consolidate_master_dataset(cat_rows, norm_rows):
+    # Mapping teks normalisasi per sub_id
+    norm_map = {r["sub_conversation_id"]: r for r in norm_rows}
+
+    # Grouping pesan per sub_conversation_id
+    sub_map = {}
+    for r in cat_rows:
+        sub_id = r["sub_conversation_id"]
+        if sub_id not in sub_map:
+            sub_map[sub_id] = []
+        sub_map[sub_id].append(r)
+
+    master_records = []
+
+    for sub_id, msgs in sub_map.items():
+        first_m = msgs[0]
+        last_m = msgs[-1]
+
+        parent_cid = first_m["conversation_id"]
+        source_file = first_m["source_file"]
+        client_resp = first_m["client_response"]
+        remote_status = first_m["penanganan_remote"]
+        gt_category = first_m["kategori_kendala"]
+
+        client_msgs = [m for m in msgs if m["role"] == "CLIENT"]
+        admin_msgs = [m for m in msgs if m["role"] == "ADMIN"]
+
+        has_credentials = any(m.get("contains_credentials") == "True" for m in msgs)
+        has_media_file = any(m.get("has_media") == "True" for m in msgs)
+
+        # Ambil teks normalisasi untuk inferensi model ML
+        norm_info = norm_map.get(sub_id, {})
+        normalized_text = norm_info.get("normalized_text", "")
+
+        # Prediksi AI Model Produksi
+        ml_res = predict_single_text(normalized_text)
+        predicted_cat = ml_res["predicted_category"]
+        confidence_score = ml_res["confidence"]
+        is_match = (predicted_cat == gt_category)
+
+        master_records.append({
+            "sub_conversation_id": sub_id,
+            "conversation_id": parent_cid,
+            "source_file": source_file,
+            "start_time": f"{first_m['tanggal']} {first_m['waktu']}",
+            "end_time": f"{last_m['tanggal']} {last_m['waktu']}",
+            "total_messages": len(msgs),
+            "client_messages_count": len(client_msgs),
+            "admin_messages_count": len(admin_msgs),
+            "has_media": "True" if has_media_file else "False",
+            "contains_credentials": "True" if has_credentials else "False",
+            "client_response": client_resp,
+            "penanganan_remote": remote_status,
+            "kategori_kendala_ground_truth": gt_category,
+            "kategori_kendala_ml_predicted": predicted_cat,
+            "prediction_confidence": f"{confidence_score:.1f}%",
+            "prediction_match": "MATCH" if is_match else "DIFFER",
+            "full_conversation": build_full_conversation(msgs),
+        })
+
+    return master_records
+
+def save_master_csv(records, output_path):
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "sub_conversation_id",
+        "conversation_id",
+        "source_file",
+        "start_time",
+        "end_time",
+        "total_messages",
+        "client_messages_count",
+        "admin_messages_count",
+        "has_media",
+        "contains_credentials",
+        "client_response",
+        "penanganan_remote",
+        "kategori_kendala_ground_truth",
+        "kategori_kendala_ml_predicted",
+        "prediction_confidence",
+        "prediction_match",
+        "full_conversation",
+    ]
+    # Simpan CSV dengan format UTF-8 BOM agar rapi saat dibuka di Microsoft Excel
+    with open(output_path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+
+    # Simpan juga versi Excel (.xlsx) jika modul openpyxl / pandas tersedia
+    try:
+        import pandas as pd
+        xlsx_path = output_path.with_suffix(".xlsx")
+        df = pd.DataFrame(records)
+        with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer_excel:
+            df.to_excel(writer_excel, index=False, sheet_name="Master Conversations")
+    except Exception:
+        pass
+
+    return output_path
+
+def validate(records):
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    total = len(records)
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+
+    # 1. Statistik Output 1: Client Response
+    resp_counts = Counter(r["client_response"] for r in records)
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    for k, v in resp_counts.most_common():
+        pass  # Per-upload diagnostics are not logged by the dashboard.
+
+    # 2. Statistik Output 3: Penanganan Remote
+    remote_counts = Counter(r["penanganan_remote"] for r in records)
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    for k, v in remote_counts.most_common():
+        pass  # Per-upload diagnostics are not logged by the dashboard.
+
+    # 3. Statistik Output 2: Kategori Kendala
+    cat_counts = Counter(r["kategori_kendala_ground_truth"] for r in records)
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    for k, v in cat_counts.most_common():
+        pass  # Per-upload diagnostics are not logged by the dashboard.
+
+    # 4. Keselarasan AI Prediction vs Ground Truth
+    match_count = sum(1 for r in records if r["prediction_match"] == "MATCH")
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    for r in records[:3]:
+        pass  # Per-upload diagnostics are not logged by the dashboard.
+        pass  # Per-upload diagnostics are not logged by the dashboard.
+        pass  # Per-upload diagnostics are not logged by the dashboard.
+        pass  # Per-upload diagnostics are not logged by the dashboard.
+        preview = r['full_conversation'][:120].replace("\n", " ")
+        pass  # Per-upload diagnostics are not logged by the dashboard.
+        pass  # Per-upload diagnostics are not logged by the dashboard.
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+
+def consolidate_master_data(cat_file=CATEGORIES_CSV, norm_file=NORMALIZED_CSV, output_file=MASTER_FINAL_CSV):
+    """Fase 18: Penggabungan Hasil Master Final."""
+    cat_path = Path(cat_file)
+    norm_path = Path(norm_file)
+    out_path = Path(output_file) if output_file else None
+
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    if out_path:
+        pass  # Per-upload diagnostics are not logged by the dashboard.
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+
+    with open(cat_path, "r", encoding="utf-8") as f:
+        cat_rows = list(csv.DictReader(f))
+
+    with open(norm_path, "r", encoding="utf-8") as f:
+        norm_rows = list(csv.DictReader(f))
+
+    master_records = consolidate_master_dataset(cat_rows, norm_rows)
+
+    if out_path:
+        save_master_csv(master_records, out_path)
+
+    validate(master_records)
+
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+    pass  # Per-upload diagnostics are not logged by the dashboard.
+
+    return master_records
+
+
+def run():
+    consolidate_master_data(CATEGORIES_CSV, NORMALIZED_CSV, MASTER_FINAL_CSV)
+
+
+if __name__ == "__main__":
+    run()

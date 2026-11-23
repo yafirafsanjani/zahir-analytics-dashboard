@@ -24,3 +24,9 @@ data/
 *.parquet
 *.sql
 .release-test/
+
+# Private NLP artifacts and caches
+.cache/
+models/
+*.pkl
+*.npz
