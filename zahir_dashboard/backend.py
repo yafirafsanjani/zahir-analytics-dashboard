@@ -5,6 +5,7 @@ import base64
 import json
 import re
 from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -85,9 +86,9 @@ SUMMARY_OPTIONAL = {
     "end": ("analysis_end",),
     "reference": ("recency_reference",),
     "status": ("analysis_status",),
-    "recency": ("recency_mean", "mean_recency", "avg_recency"),
-    "frequency": ("frequency_mean", "mean_frequency", "avg_frequency"),
-    "rfm_monetary": ("monetary_mean", "mean_monetary", "avg_monetary"),
+    "recency": ("recency_mean", "mean_recency", "avg_recency", "average_recency", "rata_rata_recency", "median_Recency_hari"),
+    "frequency": ("frequency_mean", "mean_frequency", "avg_frequency", "average_frequency", "rata_rata_frequency", "median_Frequency"),
+    "rfm_monetary": ("monetary_mean", "mean_monetary", "avg_monetary", "average_monetary", "rata_rata_monetary", "median_Monetary_Rp"),
     "silhouette": ("silhouette", "silhouette_score"),
     "davies_bouldin": ("davies_bouldin", "davies_bouldin_score", "davies_bouldin_index"),
     "calinski_harabasz": ("calinski_harabasz", "calinski_harabasz_score", "calinski_harabasz_index"),
@@ -144,6 +145,29 @@ def resolve_columns(
             actual = matches[0]
         result[logical] = actual
     return result
+
+
+def resolve_optional_columns(
+    sample: Mapping[str, Any],
+    optional: Mapping[str, tuple[str, ...]],
+    overrides: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Resolve present optional fields and validate explicit configuration."""
+    resolved = {}
+    overrides = overrides or {}
+    for logical, candidates in optional.items():
+        if logical in overrides:
+            actual = overrides[logical]
+            if not isinstance(actual, str) or actual not in sample:
+                raise DashboardError(f"Pemetaan kolom {logical} tidak ditemukan pada skema Supabase.", "schema")
+            resolved[logical] = actual
+            continue
+        matches = [field for field in sample if field.casefold() in {x.casefold() for x in candidates}]
+        if len(matches) > 1:
+            raise DashboardError(f"Pemetaan kolom opsional {logical} ambigu. Isi konfigurasi Supabase.", "schema")
+        if matches:
+            resolved[logical] = matches[0]
+    return resolved
 
 
 @dataclass(frozen=True)
@@ -260,12 +284,12 @@ class SegmentationRepository:
     def summary(self, choice: ModelChoice) -> list[dict[str, Any]]:
         fields = self.summary_map
         selected = list(fields.values())
-        optional = {}
-        for logical, candidates in SUMMARY_OPTIONAL.items():
-            matches = [name for name in self.summary_sample if name.casefold() in {x.casefold() for x in candidates}]
-            if len(matches) == 1:
-                optional[logical] = matches[0]
-                selected.append(matches[0])
+        optional = resolve_optional_columns(
+            self.summary_sample,
+            SUMMARY_OPTIONAL,
+            self.columns.get("segment_summary", {}),
+        )
+        selected.extend(actual for actual in optional.values() if actual not in selected)
         query = (
             self._table("segment_summary").select(",".join(selected))
             .eq(fields["model"], choice.raw_model).eq(fields["k"], choice.k)
@@ -351,6 +375,74 @@ class SegmentationRepository:
                 "Klaster": cluster,
             })
         return DetailPage(rows, count, page, page_size)
+
+    def rfm_summary(self, choice: ModelChoice) -> dict[str, dict[str, Decimal | int]]:
+        """Aggregate actual invoice groups into customer-level RFM means per cluster."""
+        self.discover_detail(choice)
+        fields = self.detail_map
+        selected = ",".join(fields.values())
+        rows = []
+        offset = 0
+        while True:
+            result = self._execute(
+                self._table("faktur_lolos_dengan_klaster")
+                .select(selected, count="exact")
+                .order(fields["invoice_id"])
+                .range(offset, offset + 999)
+            )
+            batch = result.data or []
+            rows.extend(batch)
+            if result.count is not None and len(rows) >= result.count:
+                break
+            if not batch:
+                break
+            offset += len(batch)
+            if offset >= 10000:
+                raise DashboardError("Data faktur terlalu besar untuk menghitung RFM di dashboard.")
+        if not rows:
+            raise DashboardError("Tidak ada faktur yang dapat dipakai untuk menghitung RFM.")
+
+        customers: dict[tuple[str, str], dict[str, Any]] = {}
+        seen_invoice_ids = set()
+        reference_date = None
+        for row in rows:
+            invoice_id = str(row[fields["invoice_id"]] or "").strip()
+            company = str(row[fields["company"]] or "").strip()
+            cluster = str(row[fields["cluster"]] or "").strip()
+            if not invoice_id or not company or not cluster or invoice_id in seen_invoice_ids:
+                raise DashboardError("Data faktur tidak lengkap atau ID kelompok faktur ganda untuk RFM.")
+            seen_invoice_ids.add(invoice_id)
+            raw_date = str(row[fields["date"]] or "")
+            try:
+                invoice_date = datetime.fromisoformat(raw_date.replace("Z", "+00:00")).date()
+            except ValueError:
+                try:
+                    invoice_date = date.fromisoformat(raw_date)
+                except ValueError:
+                    raise DashboardError("Tanggal faktur tidak valid untuk menghitung RFM.") from None
+            reference_date = max(reference_date, invoice_date) if reference_date else invoice_date
+            record = customers.setdefault((cluster, company), {
+                "last_date": invoice_date,
+                "frequency": 0,
+                "monetary": Decimal(0),
+            })
+            record["last_date"] = max(record["last_date"], invoice_date)
+            record["frequency"] += 1
+            record["monetary"] += decimal_value(row[fields["amount"]], "grand total")
+
+        per_cluster: dict[str, list[dict[str, Any]]] = {}
+        for (cluster, _), record in customers.items():
+            per_cluster.setdefault(cluster, []).append(record)
+        return {
+            cluster: {
+                "recency": sum((reference_date - record["last_date"]).days for record in records) / len(records),
+                "frequency": sum(record["frequency"] for record in records) / len(records),
+                "rfm_monetary": sum((record["monetary"] for record in records), Decimal(0)) / len(records),
+                "companies": len(records),
+                "invoices": sum(record["frequency"] for record in records),
+            }
+            for cluster, records in per_cluster.items()
+        }
 
     def export_detail(self, choice, term, cluster=None):
         """All matching rows under the current user's RLS; never silently export a partial result."""

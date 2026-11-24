@@ -6,8 +6,8 @@ from pathlib import Path
 import altair as alt
 import streamlit as st
 
-PALETTE = ['#D2231C', '#545F73', '#BCC7DE', '#E0E3E5']
-SENTIMENT_COLORS = ['#D2231C', '#545F73', '#E9BDB8']
+PALETTE = ['#D2231C', '#E11D48', '#F97316', '#94A3B8']
+SENTIMENT_COLORS = ['#15803D', '#64748B', '#D2231C']
 
 
 def activate(key, value):
@@ -61,8 +61,10 @@ def apply_theme():
     alt.theme.register('zahir', enable=True)(lambda: alt.theme.ThemeConfig(config={
         'background': 'transparent',
         'view': {'stroke': None},
-        'font': 'Inter, sans-serif',
-        'axis': {'labelColor': '#64748B', 'titleColor': '#64748B', 'gridColor': '#F1F5F9',
+        'font': 'Manrope, sans-serif',
+        'autosize': {'type': 'fit', 'contains': 'padding'},
+        'padding': {'left': 12, 'right': 16, 'top': 12, 'bottom': 12},
+        'axis': {'labelColor': '#64748B', 'titleColor': '#64748B', 'gridColor': '#E5EEFF',
                  'domain': False, 'ticks': False, 'labelPadding': 10, 'titlePadding': 12},
         'legend': {'title': None, 'labelColor': '#64748B', 'orient': 'bottom'},
         'range': {'category': PALETTE},
@@ -73,7 +75,7 @@ def apply_theme():
 
 def sidebar_brand():
     st.sidebar.markdown('<div class="brand"><div class="brand-mark">Z</div>'
-                        '<div>Zahir <span>Analytics</span><small>BUSINESS INTELLIGENCE</small></div></div>'
+                        '<div>Zahir <span>Analytics</span><small>ENTERPRISE BI</small></div></div>'
                         '<div class="nav-caption">MENU UTAMA</div>', unsafe_allow_html=True)
 
 

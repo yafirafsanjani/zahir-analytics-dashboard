@@ -7,7 +7,7 @@ from supabase import create_client
 from supabase.lib.client_options import SyncClientOptions
 from zahir_dashboard.social_page import render_social
 from zahir_dashboard.nlp_page import render_nlp
-from zahir_dashboard.ui import apply_theme, page_header, sidebar_brand, mobile_navigation
+from zahir_dashboard.ui import apply_theme, page_header, mobile_navigation, sidebar_brand
 from zahir_dashboard.segmentation_page import render_segmentation
 
 from zahir_dashboard.backend import (
@@ -72,7 +72,6 @@ def render_login(client) -> None:
 def main() -> None:
     st.set_page_config(page_title="Zahir Analytics", page_icon="📊", layout="wide")
     apply_theme()
-    sidebar_brand()
     try:
         settings = settings_from_secrets(st.secrets)
     except DashboardError as exc:
@@ -102,11 +101,12 @@ def main() -> None:
                     'Masuk untuk mengakses insight bisnis dan analisis pelanggan Anda.', 'Masuk')
         render_login(client)
         return
+    sidebar_brand()
     page = st.sidebar.radio('Halaman', ['Segmentasi Pelanggan', 'Analisis Media Sosial', 'NLP WhatsApp'], key='analytics_page')
     mobile_navigation(page)
     st.sidebar.divider()
-    st.sidebar.caption("● Akun internal aktif")
-    st.sidebar.button("Keluar", on_click=logout)
+    st.sidebar.caption('Internal BI ? Live workspace')
+    st.sidebar.button('Keluar', on_click=logout, icon=':material/logout:')
     if page == 'NLP WhatsApp':
         render_nlp(SegmentationRepository(client, settings.columns).authorize)
         return

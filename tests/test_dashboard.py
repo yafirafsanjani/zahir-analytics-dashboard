@@ -7,7 +7,7 @@ from pathlib import Path
 from streamlit.testing.v1 import AppTest
 from zahir_dashboard.backend import (
     SegmentationRepository, DashboardError, settings_from_secrets,
-    reference_checks, resolve_columns, escape_like,
+    reference_checks, resolve_columns, resolve_optional_columns, escape_like,
 )
 
 
@@ -117,6 +117,21 @@ class BackendTests(unittest.TestCase):
         repo.detail_page(choice, "Uji %_", 0, 25)
         self.assertIn(("ilike", "nama_klien", "%Uji \\%\\_%"), client.queries[-1].filters)
 
+    def test_rfm_summary_uses_actual_invoice_groups(self):
+        client = FakeClient()
+        client.tables["faktur_lolos_dengan_klaster"] = [
+            dict(nama_klien="A", id_kelompok_faktur="F1", tanggal_faktur="2026-07-01", grand_total_rp="100",
+                 kmeans_k4_cluster="C1", gmm_k3_cluster="G3_C1", gmm_k4_cluster="G4_C1"),
+            dict(nama_klien="A", id_kelompok_faktur="F2", tanggal_faktur="2026-07-10", grand_total_rp="300",
+                 kmeans_k4_cluster="C1", gmm_k3_cluster="G3_C1", gmm_k4_cluster="G4_C1"),
+            dict(nama_klien="B", id_kelompok_faktur="F3", tanggal_faktur="2026-07-05", grand_total_rp="200",
+                 kmeans_k4_cluster="C2", gmm_k3_cluster="G3_C2", gmm_k4_cluster="G4_C2"),
+        ]
+        repo = SegmentationRepository(client)
+        rfm = repo.rfm_summary(repo.discover_models()[0])
+        self.assertEqual(rfm["C1"], {"recency": 0.0, "frequency": 2.0, "rfm_monetary": Decimal("400"), "companies": 1, "invoices": 2})
+        self.assertEqual(rfm["C2"], {"recency": 5.0, "frequency": 1.0, "rfm_monetary": Decimal("200"), "companies": 1, "invoices": 1})
+
     def test_access_and_schema_fail_closed(self):
         with self.assertRaises(DashboardError):
             SegmentationRepository(FakeClient(False)).authorize()
@@ -127,6 +142,50 @@ class BackendTests(unittest.TestCase):
         with self.assertRaises(DashboardError):
             settings_from_secrets({"supabase": {"url": "https://example.supabase.co", "publishable_key": "sb_secret_test"}})
         self.assertEqual(escape_like("a%_"), "a\\%\\_")
+
+    def test_optional_summary_fields_honor_live_column_overrides(self):
+        client = FakeClient()
+        for row in client.tables["segment_summary"]:
+            row.update(
+                custom_recency=30,
+                custom_frequency=3,
+                custom_monetary=2000,
+                custom_silhouette=0.5,
+                custom_davies_bouldin=0.7,
+                custom_calinski_harabasz=100,
+            )
+        repo = SegmentationRepository(client, {"segment_summary": {
+            "recency": "custom_recency",
+            "frequency": "custom_frequency",
+            "rfm_monetary": "custom_monetary",
+            "silhouette": "custom_silhouette",
+            "davies_bouldin": "custom_davies_bouldin",
+            "calinski_harabasz": "custom_calinski_harabasz",
+        }})
+        choice = repo.discover_models()[0]
+        summary = repo.summary(choice)
+        self.assertEqual(summary[0]["recency"], 30)
+        self.assertEqual(summary[0]["frequency"], 3)
+        self.assertEqual(summary[0]["rfm_monetary"], 2000)
+        self.assertEqual(summary[0]["silhouette"], 0.5)
+        self.assertEqual(summary[0]["davies_bouldin"], 0.7)
+        self.assertEqual(summary[0]["calinski_harabasz"], 100)
+        self.assertEqual(
+            resolve_optional_columns({"RECENCY_MEAN": 1}, {"recency": ("recency_mean",)}),
+            {"recency": "RECENCY_MEAN"},
+        )
+        with self.assertRaises(DashboardError):
+            resolve_optional_columns({"a": 1}, {"recency": ("recency_mean",)}, {"recency": "missing"})
+
+    def test_optional_summary_fields_read_notebook_median_columns(self):
+        client = FakeClient()
+        for row in client.tables["segment_summary"]:
+            row.update(median_Recency_hari=30, median_Frequency=3, median_Monetary_Rp=2000)
+        repo = SegmentationRepository(client)
+        summary = repo.summary(repo.discover_models()[0])
+        self.assertEqual(summary[0]["recency"], 30)
+        self.assertEqual(summary[0]["frequency"], 3)
+        self.assertEqual(summary[0]["rfm_monetary"], 2000)
 
 
 class UITests(unittest.TestCase):
@@ -216,7 +275,7 @@ class UITests(unittest.TestCase):
         app = self.app(client).run()
         self.assertEqual(len(app.exception), 0)
         self.assertTrue(any("detail belum lengkap" in x.value for x in app.warning))
-        self.assertFalse(any(q.table_name == "faktur_lolos_dengan_klaster" for q in client.queries))
+        self.assertTrue(any(q.table_name == "faktur_lolos_dengan_klaster" for q in client.queries))
 
     def test_missing_secrets(self):
         app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=30)

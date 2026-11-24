@@ -159,3 +159,72 @@ button[kind="primary"]:hover { background:#B91C1C; border-color:#B91C1C; }
  .st-key-playstore-filters [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
    min-width:180px!important; width:180px!important; flex:0 0 180px!important; }
 }
+
+/* Executive Precision shell: retain Streamlit controls while aligning the workspace with the Stitch direction. */
+:root {
+  --zahir-red: #AC0007;
+  --ink: #0B1C30;
+  --muted: #586377;
+  --line: #D5E0F8;
+  --canvas: #F8F9FF;
+  --surface-soft: #EFF4FF;
+  --surface-strong: #E5EEFF;
+}
+html, body, [data-testid="stApp"] { color: var(--ink); background: var(--canvas); }
+[data-testid="stAppViewContainer"] { background: linear-gradient(135deg, #F8F9FF 0%, #F4F7FF 52%, #EEF4FF 100%); }
+[data-testid="stHeader"] { background: rgba(248,249,255,.92); border-bottom: 1px solid rgba(213,224,248,.7); }
+[data-testid="stMainBlockContainer"] { max-width: 1600px; padding: 1.65rem 2.75rem 3.5rem; }
+[data-testid="stVerticalBlock"] { gap: 1rem; }
+h1, h2, h3, h4 { color: var(--ink); }
+h1 { font-size: 2rem !important; letter-spacing: -.04em; }
+h2 { font-size: 1.35rem !important; }
+h3 { font-size: 1rem !important; }
+
+
+.breadcrumb { color: #6B7C95; font-weight: 500; }
+.workspace-badge { color: #00622A; border-color: #BCE8C3; background: #F3FFF5; }
+[data-testid="stMetric"], [data-testid="stContainer"][data-border="true"] {
+  border-color: var(--line); border-radius: 10px; box-shadow: 0 9px 25px rgba(22,48,91,.045); }
+[data-testid="stMetric"] { min-height: 122px; background: linear-gradient(145deg, #FFFFFF, #FBFCFF); }
+[data-testid="stMetric"]:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(22,48,91,.075); }
+[data-testid="stMetricLabel"] { color: #586377; font-weight: 650; }
+[data-testid="stMetricValue"] { color: var(--ink); font-size: 1.7rem; }
+[data-testid="stContainer"][data-border="true"] { background: rgba(255,255,255,.91); }
+[data-testid="stTabs"] [role="tablist"] { border-bottom-color: var(--line); }
+[data-testid="stTabs"] [role="tab"] { color: #586377; font-size: .79rem; font-weight: 650; }
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] { color: #AC0007; }
+[data-testid="stTabs"] [role="tab"][aria-selected="true"]::after { background: #D2231C; height: 2px; }
+[data-testid="stDataFrame"], [data-testid="stTable"] { border: 1px solid var(--line); border-radius: 8px; }
+[data-testid="stVegaLiteChart"], [data-testid="stPlotlyChart"], [data-testid="stArrowVegaLiteChart"] {
+  overflow: visible !important;
+  width: 100% !important;
+}
+.js-plotly-plot, .plot-container, .vega-embed {
+  overflow: visible !important;
+}
+.vega-embed summary {
+  display: none !important;
+}
+[data-testid="stExpander"] { border-color: var(--line); border-radius: 8px; background: rgba(255,255,255,.78); }
+[data-testid="stForm"], [data-testid="stPopoverBody"] { border-color: var(--line); background: white; }
+.st-key-playstore-filters [data-testid="stContainer"][data-border="true"],
+.st-key-nlp-filter-controls [data-testid="stContainer"][data-border="true"] { background: var(--surface-soft); border-color: #D3E4FE; box-shadow: none; }
+.record-card { border-color: var(--line); border-radius: 8px; box-shadow: 0 4px 15px rgba(22,48,91,.035); }
+.data-badge { color: #586377; background: #EFF4FF; border-color: #D5E0F8; }
+.rfm-grid, .evaluation-strip { background: #F5F8FF; border: 1px solid #E0EAFE; }
+.progress-track { background: #E7EFFD; }
+
+@media (max-width: 900px) {
+  [data-testid="stMainBlockContainer"] { padding: 1.15rem 1rem 5.5rem; }
+  .st-key-mobile-navigation { display: block; }
+  [data-testid="stHeader"] { height: 48px; }
+}
+
+/* Streamlit sidebar is the primary desktop navigation surface. */
+[data-testid="stSidebar"] { display: block; background: rgba(255,255,255,.96); border-right-color: #D5E0F8; }
+[data-testid="stSidebarUserContent"] { padding: 1.35rem 1rem; }
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+  background: #FDE9E7; color: #AC0007; border-left-color: #D2231C;
+}
+[data-testid="stSidebar"] [data-testid="stButton"] button { border-color: #D5E0F8; color: #586377; }
+[data-testid="stSidebar"] [data-testid="stButton"] button:hover { border-color: #E6BDB8; color: #AC0007; background: #FFF9F8; }
