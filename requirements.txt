@@ -1,2 +1,0 @@
-# Streamlit Community Cloud, Python 3.11
--r requirements-dashboard.txt

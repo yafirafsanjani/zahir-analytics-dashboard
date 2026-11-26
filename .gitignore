@@ -1,3 +1,12 @@
+# Node & Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+
 .venv/
 venv/
 venv_*/
@@ -6,6 +15,8 @@ venv_*/
 !.streamlit/secrets.toml.example
 .env
 .env.*
+.env.local
+.env*.local
 !.env.example
 __pycache__/
 *.py[cod]
@@ -30,3 +41,5 @@ data/
 models/
 *.pkl
 *.npz
+scripts/
+

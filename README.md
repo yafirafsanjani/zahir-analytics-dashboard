@@ -1,175 +1,135 @@
-# Zahir Analytics Dashboard
+# Zahir Analytics Dashboard (Next.js + TypeScript)
 
-Streamlit dengan login Supabase dan tiga halaman: Segmentasi Pelanggan,
-Analisis Media Sosial, NLP WhatsApp. Entry point **app.py**, Python **3.11**.
-NLP WhatsApp sekarang memproses ZIP langsung dalam proses Streamlit, tanpa
-FastAPI, localhost, Render, atau token layanan antaraplikasi.
+Aplikasi analitik bisnis Zahir yang telah dimigrasikan dari Streamlit ke **Next.js 14 (App Router) + TypeScript**, dengan antarmuka bertema **Stitch** (Tailwind CSS), visualisasi **Recharts**, dan autentikasi berbasis sesi cookie via **Supabase SSR (`@supabase/ssr`)**.
 
-## Instalasi lokal
+Aplikasi ini siap di-deploy ke **Vercel** dan terhubung langsung ke proyek Supabase yang sudah aktif.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m streamlit run app.py
-```
+---
 
-requirements.txt merujuk requirements-dashboard.txt. Paket inferensi CPU dipin:
-scikit-learn 1.8.0, NumPy 2.4.4, SciPy 1.17.1, pandas 3.0.5,
-indo-normalizer 1.2.0. Tidak memerlukan FastAPI/Uvicorn atau SDK LLM sebagai
-komponen NLP lokal. Paket yang menjadi dependency Streamlit sendiri tetap
-terpasang sesuai resolusi dependency.
+## Modul Aktif
 
-Konfigurasi asli tetap pada .streamlit/secrets.toml (diabaikan Git). Jangan
-menimpa file lokal yang sudah ada. Contoh placeholder tersedia pada
-.streamlit/secrets.toml.example. Supabase tetap menggunakan:
+Sesuai arsitektur migrasi terbaru, dashboard hanya memuat 2 modul utama:
 
-```toml
-[supabase]
-url = "https://YOUR_PROJECT.supabase.co"
-publishable_key = "sb_publishable_REPLACE_WITH_PROJECT_PUBLIC_KEY"
-```
+1. **Segmentasi Pelanggan (`/segmentasi`)**:
+   - Mendukung 3 model klastering: **K-Means (k=4)**, **GMM (k=3)**, dan **GMM (k=4)**.
+   - Tiga tab analitik: **Ikhtisar Segmen**, **Perbandingan Model**, dan **Detail Faktur**.
+   - Metrik RFM lengkap (Recency, Frequency, Monetary), metrik evaluasi model (Silhouette, Davies–Bouldin, Calinski–Harabasz jika tersedia), pencarian faktur real-time, pagination, dan ekspor CSV aman (kebijakan anti formula injection & UTF-8 BOM untuk Excel).
+   - Pengecekan validasi snapshot acuan (1.456 pelanggan, 2.874 kelompok faktur, Rp8.225.196.662,39).
 
-Gunakan publishable atau legacy anon key, bukan service-role/secret key.
-Akun masuk lewat form login. Izin/RLS dan RPC Segmentasi/Media Sosial tetap
-mengikuti proyek yang sudah berjalan; tidak ada perubahan Supabase.
+2. **Analisis Media Sosial (`/medsos`)**:
+   - Tiga tab komprehensif: **Play Store**, **Instagram**, serta **Evaluasi & Eksplorasi**.
+   - Analisis sentimen ulasan Google Play, rating, identifikasi 8 aspek keluhan/fitur, tren waktu ulasan, dan ringkasan eksekutif.
+   - Performa konten Instagram (likes, komentar, format postingan, rasio kolaborasi, heatmap hari & jam WIB, korelasi caption & hashtag, dan tabel top postingan).
+   - Tab Evaluasi: benchmark model sentimen (IndoBERT, InSet Lexicon, TF-IDF + LR, Majority baseline), interactive 3x3 confusion matrix heatmap, klaster topik eksploratif K-Means k=4, diagnostik silhouette k=3–6, serta tabel kualitas data & cakupan.
+   - Pengecekan snapshot acuan (417 ulasan Play Store, 234 pasangan aspek, 55 postingan Instagram, 13.147 interaksi).
 
-## Model privat untuk NLP lokal dan Community Cloud
+> **Catatan NLP WhatsApp**: Modul WhatsApp NLP telah dipisahkan dari rute navigasi dan dependensi runtime dashboard produksi. Riwayat implementasi NLP tetap tersimpan utuh dalam riwayat Git (commit `80711e1` dan sebelumnya) sehingga dapat digunakan kembali sebagai repositori atau layanan terpisah kapan pun diperlukan.
 
-Dua pickle produksi tidak dimasukkan ke Git. Kode membaca cache privat lokal:
-.cache/nlp_models/best_model.pkl dan .cache/nlp_models/tfidf_vectorizer.pkl.
-Pasangan diperiksa SHA-256 sebelum unpickle dan divalidasi vocabulary/IDF serta
-jumlah fiturnya. Tidak ada fit TF-IDF, split atau training pada jalur unggahan.
+---
 
-| File | SHA-256 |
-| --- | --- |
-| best_model.pkl | bb6dd03738b4a6c1595623c68abf3ed399932afa44655a0230d8a372972c29b5 |
-| tfidf_vectorizer.pkl | 299a0b1454504d49ee3ee4ac707f92cd8fba4a04545d891c05e20ce04fa24acf |
+## Prasyarat Lingkungan
 
-Lokal: pasangan tepercaya dapat disalin secara privat ke cache tersebut.
-Community Cloud: lampirkan kedua file ke GitHub Release pada **repository
-private**, lalu isi App settings > Secrets:
+- **Node.js**: Versi 18.17.0 atau lebih baru (direkomendasikan Node.js v20 LTS atau v24).
+- **npm**: Versi 9 atau lebih baru.
+- Akun dan kredensial Supabase aktif (URL & Publishable/Anon Key).
 
-```toml
-[nlp_models]
-repository = "OWNER/PRIVATE_MODEL_REPOSITORY"
-read_token = "REPLACE_WITH_READ_ONLY_GITHUB_TOKEN"
-model_asset_id = "REPLACE_WITH_NUMERIC_MODEL_ASSET_ID"
-vectorizer_asset_id = "REPLACE_WITH_NUMERIC_VECTORIZER_ASSET_ID"
-```
+---
 
-ID adalah ID masing-masing release asset, bukan release ID atau tag. Aset pada
-repo publik bukan aset privat. Fine-grained PAT hanya untuk repo model privat,
-Contents: Read-only. PAT hanya untuk provisioning model, tidak dikirim bersama
-ZIP atau ke browser. Kode memakai GitHub API dan redirect CDN HTTPS tanpa
-meneruskan PAT. Hash salah menghentikan proses, tanpa memuat pickle yang salah.
+## Panduan Instalasi Lokal (PowerShell)
 
-Jika hosting menyediakan environment, alternatif nama konfigurasinya adalah
-GITHUB_MODEL_REPOSITORY, GITHUB_MODEL_TOKEN, GITHUB_MODEL_ASSET_ID,
-GITHUB_VECTORIZER_ASSET_ID; environment memiliki prioritas di atas secrets.
-Cache yang sudah valid tidak mengunduh ulang. Pada cache kosong, konfigurasi
-private asset harus lengkap. Repo lain atau folder nlp_zahir tidak diperlukan
-oleh aplikasi setelah deployment. Tidak ada model atau credential bawaan.
-
-Konfigurasi lama NLP_API_BASE_URL, nlp.api_base_url dan nlp.service_token tidak
-lagi dibaca. Tidak perlu mengubah secrets Supabase yang sudah valid.
-
-## Pemrosesan dan isolasi
-
-Fungsi inti disalin dari nlp_zahir ke zahir_dashboard/nlp_core dengan import
-relatif ke namespace dashboard. Rantai proses: ingestion ZIP, parsing, role,
-percakapan/respons/remote, kategori, preprocessing/normalisasi, inferensi produksi,
-konsolidasi, lalu overview/issues dengan perhitungan yang sama seperti API lama.
-Lihat zahir_dashboard/nlp_core/PROVENANCE.md untuk penyesuaian.
-
-Setiap klik Proses membuat UUID sesi dan direktori sementara sendiri. Seluruh
-chat, media, ZIP dan CSV intermediate/master dihapus ketika proses selesai atau
-gagal. Hanya ringkasan hasil terakhir tersimpan pada session_state pengguna.
-Tidak ada cache hasil/data pengguna bersama atau file global data/runs. Dua
-unggahan bersamaan tidak berbagi workspace. Tidak ada redirect stdout global;
-diagnostik yang memuat chat dinonaktifkan pada core salinan.
-
-Widget biasa tidak mengulang pemrosesan. Unggahan gagal mempertahankan hasil
-terakhir yang berhasil. Logout menghapus state hasil dan uploader. Browser/sesi
-baru tidak otomatis melihat hasil pengguna lain. Restart Streamlit menghilangkan
-hasil di memori. Cache model saja yang boleh dipakai bersama.
-
-Mapping role default hanya berisi peserta demo sintetis dan SYSTEM. Untuk nama
-pengirim sebenarnya, isi tabel privat [nlp_roles] di secrets, nilai ADMIN,
-CLIENT, SYSTEM. Mapping diteruskan per panggilan tanpa mengubah global role map;
-pengirim yang tidak dikenal tetap UNKNOWN sesuai perilaku core sebelumnya.
-Jangan commit nama pelanggan pada contoh/source. Hasil role berbeda dapat
-mempengaruhi teks keluhan yang dipakai model.
-
-## Deployment Community Cloud
-
-Repo dashboard/main, entry point app.py, Python 3.11. requirements.txt standar
-menyediakan semua dependensi dan nlp_core/config ikut source. Isi secrets
-Supabase dan nlp_models. Tidak perlu menjalankan backend lain. Model diunduh
-secara privat ketika pertama kali Proses ditekan bila cache belum ada.
-
-Pemeriksaan lokal berhasil meresolusikan dan mengunduh seluruh wheel untuk
-Linux x86_64/Python 3.11 (manylinux), tanpa source build. Runtime Linux/Community
-Cloud belum dijalankan pada persiapan ini. Model lokal tersedia dan cocok, namun
-empat field nlp_models belum diisi pada konfigurasi lokal yang diperiksa. Pada
-instance Cloud baru, kekurangan tersebut menghalangi NLP sampai private asset
-beserta konfigurasinya tersedia. Tidak ada hambatan dependency yang ditemukan
-pada pemeriksaan wheel; hasil ini bukan pengganti smoke test Cloud.
-
-## Pengujian
+Jalankan perintah berikut di PowerShell dari direktori root proyek:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\.venv\Scripts\python.exe -m pip check
+# 1. Pastikan dependensi JavaScript/Node terpasang
+npm install
+
+# 2. Siapkan file konfigurasi lingkungan lokal
+Copy-Item .env.example .env.local
+
+# 3. Edit .env.local dan isi kredensial Supabase Anda
+notepad .env.local
+
+# 4. Jalankan server pengembangan lokal (hot-reload)
+npm run dev
 ```
 
-Tes inferensi nyata memerlukan model privat pada cache di atas. Tanpa model,
-tes tersebut skipped; jangan menganggap skip sebagai bukti inferensi berhasil.
-Fixture tests/fixtures/WhatsApp_Uji_Sintetis_Zahir.zip berisi 12 pesan buatan;
-hasil pembanding 3 percakapan dan 3 kendala. Tes lokal memblokir semua HTTP ketika
-model siap, melarang fit/train, menguji unggahan bersamaan 3 vs 1 percakapan,
-cleanup, browser/sesi baru, kegagalan, pergantian halaman dan logout.
-Tes Supabase memakai fake client tanpa mengubah database. Handoff internal tidak
-dibaca dan tetap diabaikan Git. Detail hasil: LOCAL_NLP_REPORT.md.
+Buka peramban di [http://localhost:3000](http://localhost:3000). Aplikasi akan otomatis mengarahkan ke `/login` jika belum terautentikasi, atau `/segmentasi` jika sesi sudah aktif.
 
-## Data historis NLP WhatsApp
+---
 
-Tab Ringkasan, Penanganan, Pelanggan, Tren waktu, dan Detail percakapan dapat
-digunakan untuk ZIP yang baru diunggah dan untuk snapshot hasil analisis yang
-sudah ada. Saat snapshot historis dikonfigurasi, halaman membukanya secara
-default dan memeriksa izin internal lewat fungsi Supabase
-`has_segmentation_access` yang sudah digunakan oleh dashboard.
+## Konfigurasi Lingkungan (`.env.local`)
 
-1. Temukan `master_conversations_final.csv` dari hasil analisis yang ingin
-   ditampilkan. Jalankan dari root repo dashboard dan ubah path input sesuai
-   lokasi master yang sebenarnya. Tambahkan `--mapping PATH` jika
-   `chat_mapping.json` tidak berada pada path bawaan `raw/chat` pada folder
-   induk output.
+File `.env.local` digunakan untuk menyimpan kredensial lokal dan sudah dimasukkan ke `.gitignore` agar tidak bocor ke Git.
 
-   ```powershell
-   python -m zahir_dashboard.nlp_data "D:\path\master_conversations_final.csv" "D:\path\nlp_history.csv"
-   Get-FileHash -Algorithm SHA256 "D:\path\nlp_history.csv"
-   ```
+Format file `.env.local`:
 
-2. Lampirkan `nlp_history.csv` pada rilis di repo GitHub **private** yang sama
-   dengan `nlp_models.repository`. Catat ID numerik aset. Ekspor berisi
-   metadata analitik berkode. Jangan gunakan master asli sebagai aset.
-3. Tambahkan pengaturan berikut ke Streamlit Cloud Secrets. Nilai
-   `nlp_models.read_token` yang berizin baca repo tersebut juga digunakan
-   untuk membaca snapshot.
+```env
+# Supabase Configuration
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_key_here
 
-   ```toml
-   [nlp_history]
-   asset_id = "ID_ASET_CSV"
-   sha256 = "HASH_SHA256"
-   ```
+# Opsional: Jika menggunakan legacy anon key
+# NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
+```
 
-4. Masuk dengan akun internal yang memiliki izin tersebut. Buka **NLP
-   WhatsApp → Data historis**. Unggahan ZIP tetap dapat dianalisis melalui
-   pilihan **Unggahan ZIP**. Kedua sumber ditampilkan sendiri-sendiri agar
-   data yang sama tidak dihitung dua kali.
+> **Keamanan Kredensial**:
+> - Jangan pernah memasukkan `service_role` key ke dalam file `.env.local` atau kode sumber.
+> - Dashboard beroperasi dengan identitas pengguna login (`authenticated` role) sehingga seluruh aturan Row Level Security (RLS) dan RPC perizinan (`has_segmentation_access`, `has_social_analytics_access`) ditegakkan langsung oleh server database.
 
-Kode pelanggan, percakapan, dan kendala berlaku di dalam masing-masing
-snapshot atau unggahan. Detail tidak menyertakan isi chat, nama pelanggan,
-nama file sumber, atau nilai kredensial. Indikasi kredensial hanya berupa
-status. Kecocokan adalah perbandingan kategori model dengan kategori
-berbasis aturan, bukan pengukuran akurasi terhadap label manual.
+---
+
+## Verifikasi Kualitas Kode & Pengujian
+
+Aplikasi telah dilengkapi rangkaian pengujian otomatis, type-checking, linter, dan production build runner:
+
+```powershell
+# 1. Jalankan pemeriksaan tipe statis TypeScript
+npm run typecheck
+
+# 2. Jalankan linter ESLint
+npm run lint
+
+# 3. Jalankan suite pengujian unit dan integrasi (Node.js test runner)
+npm run test
+
+# 4. Uji pembuatan production bundle Next.js
+npm run build
+
+# 5. Jalankan server production lokal untuk evaluasi performa
+npm run start
+```
+
+---
+
+## Panduan Deployment ke Vercel
+
+Aplikasi ini siap di-deploy ke Vercel tanpa perlu konfigurasi kustom tambahan:
+
+1. **Import Repositori**:
+   - Masuk ke dashboard [Vercel](https://vercel.com).
+   - Klik **Add New Project** dan pilih repositori `zahir-analytics-dashboard`.
+   - Pilih branch yang akan di-deploy (misalnya `migrasi` atau `main` setelah merge disetujui).
+
+2. **Pengaturan Project**:
+   - **Framework Preset**: `Next.js` (terdeteksi otomatis).
+   - **Root Directory**: `./` (root repositori).
+   - **Build Command**: `npm run build` atau `next build`.
+   - **Output Directory**: `.next` (otomatis).
+
+3. **Environment Variables**:
+   Tambahkan environment variables berikut pada pengaturan Vercel (**Settings > Environment Variables**):
+   - `NEXT_PUBLIC_SUPABASE_URL` = Nilai URL Supabase proyek Anda.
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` = Nilai publishable key / anon key Supabase proyek Anda.
+
+4. **Deploy**:
+   - Klik **Deploy**.
+   - Vercel akan menjalankan build Next.js, memproses static optimization, dan meluncurkan App Router beserta Edge/Node middleware secara otomatis.
+
+---
+
+## Kebersihan Repositori
+
+Dalam proses migrasi ini:
+- Folder Streamlit terpisah `segmentation_dashboard/` telah dihapus dari repositori kerja.
+- Entry point Streamlit lama (`app.py`, `requirements.txt`, `requirements-dashboard.txt`) telah dibersihkan.
+- Seluruh riwayat komit Git tetap terjaga.
